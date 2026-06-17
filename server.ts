@@ -96,6 +96,23 @@ nextApp.prepare().then(() => {
     );
 
     socket.on(
+      "update-name",
+      ({ roomId, name }: { roomId: string; name: string }) => {
+        const participants = getParticipants(roomId);
+        const participant = participants.find(p => p.id === socket.id);
+        if (!participant) return;
+
+        const oldName = participant.name;
+        participant.name = name;
+        socket.data.name = name;
+        updateParticipant(roomId, participant);
+
+        io.to(roomId).emit("participant-updated", { participant });
+        console.log(`[WS] ${oldName} changed name to ${name}`);
+      }
+    );
+
+    socket.on(
       "slide-change",
       async ({ roomId, slideIndex }: { roomId: string; slideIndex: number }) => {
         const participants = getParticipants(roomId);
@@ -134,30 +151,36 @@ nextApp.prepare().then(() => {
       ({
         roomId,
         path,
+        slideIndex,
+        drawingId,
       }: {
         roomId: string;
         path: { x: number; y: number }[];
+        slideIndex: number;
+        drawingId?: string;
       }) => {
         const participants = getParticipants(roomId);
         const participant = participants.find(p => p.id === socket.id);
         if (!participant || participant.mode !== "presenting") return;
 
-        // Broadcast drawing to all participants
+        // Broadcast drawing to all participants with slide index and drawing ID
         io.to(roomId).emit("draw-update", {
           participantId: socket.id,
           name: participant.name,
           path,
+          slideIndex,
+          drawingId,
         });
       }
     );
 
-    socket.on("clear-drawings", ({ roomId }: { roomId: string }) => {
+    socket.on("clear-drawings", ({ roomId, slideIndex }: { roomId: string; slideIndex: number }) => {
       const participants = getParticipants(roomId);
       const participant = participants.find(p => p.id === socket.id);
       if (!participant || participant.mode !== "presenting") return;
 
-      io.to(roomId).emit("clear-drawings");
-      console.log(`[WS] Drawings cleared by ${participant.name}`);
+      io.to(roomId).emit("clear-drawings", { slideIndex });
+      console.log(`[WS] Drawings cleared on slide ${slideIndex} by ${participant.name}`);
     });
 
     socket.on("end-session", ({ roomId }: { roomId: string }) => {

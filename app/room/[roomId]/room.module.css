@@ -255,11 +255,19 @@
   border: 1px solid var(--border);
 }
 
+.nameCard {
+  padding: 12px;
+  background: var(--bg-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
 .remoteCursor {
   position: absolute;
   pointer-events: none;
   z-index: 100;
   transition: all 0.1s ease-out;
+  transform: translate(-5px, -3px); /* Offset to align SVG arrow tip with actual cursor position */
 }
 
 .cursorName {
@@ -297,4 +305,10 @@
   font-size: 13px;
   color: var(--text-2);
   box-shadow: var(--shadow);
+}
+
+.viewerControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }

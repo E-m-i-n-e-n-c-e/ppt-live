@@ -32,6 +32,7 @@ interface DrawPath {
   participantId: string;
   name: string;
   path: { x: number; y: number }[];
+  drawingId?: string;
 }
 
 export default function UnifiedRoom() {
@@ -50,14 +51,22 @@ export default function UnifiedRoom() {
   const [connected, setConnected] = useState(false);
   const [ended, setEnded] = useState(false);
   const [cursors, setCursors] = useState<CursorPosition[]>([]);
-  const [drawings, setDrawings] = useState<DrawPath[]>([]);
+  const [drawingsBySlide, setDrawingsBySlide] = useState<Record<number, DrawPath[]>>({});
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawingEnabled, setDrawingEnabled] = useState(false);
   const [currentPath, setCurrentPath] = useState<{ x: number; y: number }[]>([]);
+  const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [newName, setNewName] = useState(userName);
+  const [myCursor, setMyCursor] = useState<{ x: number; y: number } | null>(null);
+  const [showCustomCursor, setShowCustomCursor] = useState(true);
 
   const slideContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Get drawings for current slide
+  const drawings = drawingsBySlide[currentSlide] || [];
 
   // ── Socket setup ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -113,12 +122,38 @@ export default function UnifiedRoom() {
       });
     });
 
-    socket.on("draw-update", ({ participantId, name, path }: DrawPath) => {
-      setDrawings((prev) => [...prev, { participantId, name, path }]);
+    socket.on("draw-update", ({ participantId, name, path, slideIndex, drawingId }: DrawPath & { slideIndex: number; drawingId?: string }) => {
+      setDrawingsBySlide((prev) => {
+        const slideDrawings = prev[slideIndex] || [];
+        
+        if (drawingId) {
+          // Check if this drawing ID already exists
+          const existingIndex = slideDrawings.findIndex(d => d.drawingId === drawingId);
+          
+          if (existingIndex !== -1) {
+            // Update existing drawing
+            const updated = [...slideDrawings];
+            updated[existingIndex] = { participantId, name, path, drawingId };
+            return {
+              ...prev,
+              [slideIndex]: updated,
+            };
+          }
+        }
+        
+        // Add as new drawing
+        return {
+          ...prev,
+          [slideIndex]: [...slideDrawings, { participantId, name, path, drawingId }],
+        };
+      });
     });
 
-    socket.on("clear-drawings", () => {
-      setDrawings([]);
+    socket.on("clear-drawings", ({ slideIndex }: { slideIndex: number }) => {
+      setDrawingsBySlide((prev) => ({
+        ...prev,
+        [slideIndex]: [],
+      }));
     });
 
     socket.on("session-ended", () => setEnded(true));
@@ -147,11 +182,29 @@ export default function UnifiedRoom() {
     };
   }, [roomId, userName, myMode]);
 
+  // ── Fullscreen state detection ──────────────────────────────────────────────
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
   // ── Keyboard navigation ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (myMode !== "presenting") return;
-    
     const handleKey = (e: KeyboardEvent) => {
+      // Fullscreen toggle for everyone (F key)
+      if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        toggleFullscreen();
+        return;
+      }
+
+      // Slide navigation only for presenters
+      if (myMode !== "presenting") return;
+      
       if (e.key === "ArrowRight" || e.key === " ") {
         e.preventDefault();
         goTo(currentSlide + 1);
@@ -159,10 +212,6 @@ export default function UnifiedRoom() {
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         goTo(currentSlide - 1);
-      }
-      if (e.key === "f" || e.key === "F") {
-        e.preventDefault();
-        toggleFullscreen();
       }
     };
     window.addEventListener("keydown", handleKey);
@@ -180,7 +229,7 @@ export default function UnifiedRoom() {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw all paths
+    // Draw all completed paths
     drawings.forEach((drawing) => {
       ctx.strokeStyle = "#FF0000";
       ctx.lineWidth = 3;
@@ -197,7 +246,25 @@ export default function UnifiedRoom() {
       });
       ctx.stroke();
     });
-  }, [drawings]);
+
+    // Draw current path being drawn
+    if (currentPath.length > 0 && isDrawing) {
+      ctx.strokeStyle = "#FF0000";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      ctx.beginPath();
+      currentPath.forEach((point, i) => {
+        if (i === 0) {
+          ctx.moveTo(point.x, point.y);
+        } else {
+          ctx.lineTo(point.x, point.y);
+        }
+      });
+      ctx.stroke();
+    }
+  }, [drawings, currentPath, isDrawing]);
 
   const goTo = useCallback(
     (idx: number) => {
@@ -219,10 +286,8 @@ export default function UnifiedRoom() {
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       slideContainerRef.current?.requestFullscreen();
-      setIsFullscreen(true);
     } else {
       document.exitFullscreen();
-      setIsFullscreen(false);
     }
   };
 
@@ -233,42 +298,81 @@ export default function UnifiedRoom() {
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
+    // Update local cursor position
+    setMyCursor({ x, y });
+
     getSocket().emit("cursor-move", { roomId, x, y });
   };
 
   const handleDrawStart = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (myMode !== "presenting" || !drawingEnabled) return;
     setIsDrawing(true);
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    
+    // Generate unique ID for this drawing session
+    const drawingId = `${Date.now()}-${Math.random()}`;
+    setCurrentDrawingId(drawingId);
+    
+    const canvas = e.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    
+    // Calculate position relative to the actual displayed image size
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    
     setCurrentPath([{ x, y }]);
   };
 
   const handleDrawMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || myMode !== "presenting") return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setCurrentPath((prev) => [...prev, { x, y }]);
+    if (!isDrawing || myMode !== "presenting" || !currentDrawingId) return;
+    
+    const canvas = e.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    
+    // Calculate position relative to the actual displayed image size
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    
+    const newPath = [...currentPath, { x, y }];
+    setCurrentPath(newPath);
+    
+    // Emit real-time drawing update with slide index and drawing ID
+    getSocket().emit("draw", { roomId, path: newPath, slideIndex: currentSlide, drawingId: currentDrawingId });
   };
 
   const handleDrawEnd = () => {
     if (!isDrawing || myMode !== "presenting") return;
     setIsDrawing(false);
-    if (currentPath.length > 0) {
-      getSocket().emit("draw", { roomId, path: currentPath });
-      setDrawings((prev) => [
+    if (currentPath.length > 0 && currentDrawingId) {
+      // Already emitted during drawing, just save to local state
+      setDrawingsBySlide((prev) => ({
         ...prev,
-        { participantId: "me", name: userName, path: currentPath },
-      ]);
+        [currentSlide]: [...(prev[currentSlide] || []), { participantId: "me", name: newName, path: currentPath, drawingId: currentDrawingId }],
+      }));
     }
     setCurrentPath([]);
+    setCurrentDrawingId(null);
   };
 
   const clearAllDrawings = () => {
-    getSocket().emit("clear-drawings", { roomId });
-    setDrawings([]);
+    getSocket().emit("clear-drawings", { roomId, slideIndex: currentSlide });
+    setDrawingsBySlide((prev) => ({
+      ...prev,
+      [currentSlide]: [],
+    }));
+  };
+
+  const handleNameChange = () => {
+    if (newName.trim() && newName !== userName) {
+      // TODO: Emit name change to server
+      getSocket().emit("update-name", { roomId, name: newName.trim() });
+      setIsEditingName(false);
+    }
   };
 
   const copyRoomCode = () => {
@@ -365,6 +469,35 @@ export default function UnifiedRoom() {
                 ? "You can present & control slides"
                 : "Click to switch to presenting mode"}
             </p>
+          </div>
+
+          {/* User Name */}
+          <div className={styles.nameCard}>
+            {isEditingName ? (
+              <div style={{ display: "flex", gap: 4 }}>
+                <input
+                  type="text"
+                  className="input"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleNameChange()}
+                  onBlur={handleNameChange}
+                  autoFocus
+                  style={{ flex: 1, fontSize: 13 }}
+                />
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>👤 {newName}</span>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setIsEditingName(true)}
+                  style={{ fontSize: 11, padding: "4px 8px" }}
+                >
+                  Edit
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Room code */}
@@ -464,7 +597,7 @@ export default function UnifiedRoom() {
           ref={slideContainerRef}
           className={styles.slideWrap}
           onMouseMove={handleMouseMove}
-          style={{ position: "relative" }}
+          style={{ position: "relative", cursor: myMode === "presenting" && showCustomCursor ? "none" : "default" }}
         >
           <img
             key={slideUrl}
@@ -515,6 +648,27 @@ export default function UnifiedRoom() {
               <span className={styles.cursorName}>{cursor.name}</span>
             </div>
           ))}
+
+          {/* My own cursor (when presenting, custom cursor enabled, and not drawing) */}
+          {myMode === "presenting" && myCursor && showCustomCursor && !drawingEnabled && (
+            <div
+              className={styles.remoteCursor}
+              style={{
+                left: `${myCursor.x}%`,
+                top: `${myCursor.y}%`,
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path
+                  d="M5 3L15 10L9 11L7 17L5 3Z"
+                  fill="var(--accent)"
+                  stroke="white"
+                  strokeWidth="1"
+                />
+              </svg>
+              <span className={styles.cursorName}>{newName} (You)</span>
+            </div>
+          )}
         </div>
 
         {/* Controls */}
@@ -541,6 +695,14 @@ export default function UnifiedRoom() {
               {drawingEnabled ? "✏️ Drawing" : "✏️ Pen"}
             </button>
 
+            <button
+              className={`btn ${showCustomCursor ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setShowCustomCursor(!showCustomCursor)}
+              title="Toggle custom cursor"
+            >
+              {showCustomCursor ? "🖱️ Custom" : "🖱️ Default"}
+            </button>
+
             {drawings.length > 0 && (
               <button className="btn btn-ghost" onClick={clearAllDrawings}>
                 🗑️ Clear
@@ -562,16 +724,21 @@ export default function UnifiedRoom() {
         )}
 
         {myMode === "viewing" && (
-          <div className={styles.viewerBadge}>
-            <span className="live-dot" style={{ width: 5, height: 5 }} />
-            Watching {presenters.length > 0 ? presenters[0].name : "presentation"}
+          <div className={styles.viewerControls}>
+            <div className={styles.viewerBadge}>
+              <span className="live-dot" style={{ width: 5, height: 5 }} />
+              Watching {presenters.length > 0 ? presenters[0].name : "presentation"}
+            </div>
+            <button className="btn btn-ghost" onClick={toggleFullscreen}>
+              {isFullscreen ? "⛶ Exit Fullscreen" : "⛶ Fullscreen"}
+            </button>
           </div>
         )}
 
         <p className={styles.keyHint}>
           {myMode === "presenting"
             ? "← → or Spacebar to navigate · F for fullscreen"
-            : "Switch to presenting mode to control slides"}
+            : "Press F for fullscreen"}
         </p>
       </div>
     </div>
