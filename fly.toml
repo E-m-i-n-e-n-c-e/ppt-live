@@ -6,6 +6,7 @@ primary_region = "bom"
 [env]
   NODE_ENV = "production"
   PORT = "3000"
+  REDIS_URL = "rediss://default:gQAAAAAAAfdCAAIgcDE0ODA2NjNlN2U3YWQ0Mjc5YWQwNDgxNjdjMzIxZTI1Ng@smiling-panda-128834.upstash.io:6379"
   NEXT_TELEMETRY_DISABLED = "1"
 
 [http_service]
@@ -30,8 +31,3 @@ primary_region = "bom"
 [[vm]]
   size = "shared-cpu-2x"
   memory = "2gb"
-
-[[mounts]]
-  source = "ppt_live_data"
-  destination = "/app/public/rooms"
-  initial_size = "1gb"

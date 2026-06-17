@@ -19,13 +19,14 @@ RUN npm run build
 FROM node:20-bookworm AS runner
 WORKDIR /app
 
-# Install LibreOffice for PPTX → PNG conversion
+# Install LibreOffice for PPTX → PNG conversion and poppler-utils for PDF → PNG
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       libreoffice \
       libreoffice-impress \
       fonts-liberation \
       fonts-dejavu \
+      poppler-utils \
       && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
@@ -49,8 +50,8 @@ RUN node_modules/.bin/esbuild server.ts \
     --packages=external \
     --outfile=server.js
 
-# Ensure runtime dirs exist
-RUN mkdir -p tmp public/rooms
+# Ensure runtime dirs exist (but we store slides in memory, not disk)
+RUN mkdir -p tmp
 
 EXPOSE 3000
 

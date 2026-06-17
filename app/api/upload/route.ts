@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { writeFile, mkdir, readdir, copyFile, unlink } from "fs/promises";
+import { writeFile, mkdir, readdir, readFile, unlink } from "fs/promises";
 import path from "path";
 import { customAlphabet } from "nanoid";
+import { createRoom } from "@/lib/room-store";
 
 const execAsync = promisify(exec);
 const nanoid = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
@@ -28,6 +29,21 @@ async function convertPptx(pptxPath: string, outDir: string): Promise<void> {
   throw new Error("LibreOffice not found");
 }
 
+async function convertPdf(pdfPath: string, outDir: string): Promise<void> {
+  // Use pdftoppm from poppler-utils (available in Docker)
+  // -png: output format
+  // -r 150: resolution (DPI) for better quality
+  try {
+    // pdftoppm outputs files as prefix-pagenum.png (e.g., page-1.png, page-2.png)
+    await execAsync(
+      `pdftoppm -png -r 150 "${pdfPath}" "${path.join(outDir, "page")}"`
+    );
+  } catch (error: any) {
+    console.error("[convertPdf] Error:", error.message);
+    throw new Error(`PDF conversion failed: ${error.message}`);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -37,37 +53,49 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    if (!file.name.match(/\.pptx?$/i)) {
-      return NextResponse.json({ error: "Only .pptx files are supported" }, { status: 400 });
+    const isPdf = file.name.match(/\.pdf$/i);
+    const isPptx = file.name.match(/\.pptx?$/i);
+
+    if (!isPdf && !isPptx) {
+      return NextResponse.json(
+        { error: "Only .pptx and .pdf files are supported" },
+        { status: 400 }
+      );
     }
 
     const roomId = nanoid();
     const tmpDir = `/tmp/ppt-live-${roomId}`;
-    const publicDir = path.join(process.cwd(), "public", "rooms", roomId);
 
     await mkdir(tmpDir, { recursive: true });
-    await mkdir(publicDir, { recursive: true });
 
-    // Write uploaded file to disk
+    // Write uploaded file to disk (temporarily for conversion)
     const buffer = Buffer.from(await file.arrayBuffer());
-    const pptxPath = path.join(tmpDir, "presentation.pptx");
-    await writeFile(pptxPath, buffer);
+    const ext = isPdf ? "pdf" : "pptx";
+    const filePath = path.join(tmpDir, `presentation.${ext}`);
+    await writeFile(filePath, buffer);
 
-    // Convert to PNGs
+    // Convert to PNGs based on file type
     try {
-      await convertPptx(pptxPath, tmpDir);
-    } catch {
+      if (isPdf) {
+        await convertPdf(filePath, tmpDir);
+      } else {
+        await convertPptx(filePath, tmpDir);
+      }
+    } catch (error) {
+      const errorMsg = isPdf
+        ? "PDF conversion failed. Please ensure the PDF is valid."
+        : "LibreOffice is required to convert slides. Install it with: brew install --cask libreoffice";
+      
       return NextResponse.json(
         {
-          error:
-            "LibreOffice is required to convert slides. Install it with: brew install --cask libreoffice",
-          libreofficeRequired: true,
+          error: errorMsg,
+          libreofficeRequired: !isPdf,
         },
         { status: 500 }
       );
     }
 
-    // Move generated PNGs to public/rooms/[roomId]/
+    // Load generated PNGs into memory
     const allFiles = await readdir(tmpDir);
     const pngs = allFiles
       .filter((f) => f.endsWith(".png"))
@@ -75,26 +103,33 @@ export async function POST(req: NextRequest) {
 
     if (pngs.length === 0) {
       return NextResponse.json(
-        { error: "Conversion produced no slides. Is the file a valid PPTX?" },
+        { error: `Conversion produced no slides. Is the file a valid ${isPdf ? "PDF" : "PPTX"}?` },
         { status: 500 }
       );
     }
 
-    const slides: string[] = [];
-    for (let i = 0; i < pngs.length; i++) {
-      const src = path.join(tmpDir, pngs[i]);
-      const dest = path.join(publicDir, `slide-${i + 1}.png`);
-      // Use copyFile instead of rename for cross-device compatibility
-      await copyFile(src, dest);
-      await unlink(src); // Clean up temp file after copying
-      slides.push(`/rooms/${roomId}/slide-${i + 1}.png`);
+    // Read all slides into memory as Buffers
+    const slideBuffers: Buffer[] = [];
+    for (const png of pngs) {
+      const pngPath = path.join(tmpDir, png);
+      const imageBuffer = await readFile(pngPath);
+      slideBuffers.push(imageBuffer);
+      await unlink(pngPath); // Clean up immediately after reading
     }
 
-    // Write manifest so server.ts can lazy-load this room
-    const manifest = { roomId, slides, totalSlides: slides.length, currentSlide: 0 };
-    await writeFile(path.join(publicDir, "manifest.json"), JSON.stringify(manifest));
+    // Store room in Redis (accessible from all processes/instances)
+    await createRoom(roomId, slideBuffers);
 
-    return NextResponse.json({ roomId, slides, totalSlides: slides.length });
+    console.log(`[upload] Room ${roomId} created with ${slideBuffers.length} slides`);
+
+    // Clean up temp directory
+    await unlink(filePath).catch(() => {}); // Clean up source file
+
+    return NextResponse.json({ 
+      roomId, 
+      totalSlides: slideBuffers.length,
+      slides: slideBuffers.length, // Just return count
+    });
   } catch (err) {
     console.error("[upload]", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

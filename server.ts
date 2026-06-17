@@ -2,54 +2,20 @@ import { createServer } from "http";
 import { Server, Socket } from "socket.io";
 import next from "next";
 import express, { Request, Response } from "express";
-import { readFile } from "fs/promises";
-import path from "path";
+import { 
+  roomExists, 
+  getRoomMeta, 
+  updateCurrentSlide,
+  addParticipant,
+  removeParticipant,
+  getParticipants,
+  updateParticipant,
+  type Participant 
+} from "./lib/room-store";
 
 const dev = process.env.NODE_ENV !== "production";
 const nextApp = next({ dev });
 const handle = nextApp.getRequestHandler();
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Viewer {
-  id: string;
-  name: string;
-}
-
-interface Room {
-  slides: string[];
-  totalSlides: number;
-  currentSlide: number;
-  presenter: { id: string; name: string } | null;
-  viewers: Map<string, string>; // socketId → name
-}
-
-// ─── Global Room Store ────────────────────────────────────────────────────────
-
-export const rooms = new Map<string, Room>();
-
-async function loadRoomFromManifest(roomId: string): Promise<Room | null> {
-  try {
-    const manifestPath = path.join(
-      process.cwd(),
-      "public",
-      "rooms",
-      roomId,
-      "manifest.json"
-    );
-    const raw = await readFile(manifestPath, "utf-8");
-    const data = JSON.parse(raw) as { slides: string[]; totalSlides: number };
-    return {
-      slides: data.slides,
-      totalSlides: data.totalSlides,
-      currentSlide: 0,
-      presenter: null,
-      viewers: new Map(),
-    };
-  } catch {
-    return null;
-  }
-}
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -71,92 +37,148 @@ nextApp.prepare().then(() => {
       async ({
         roomId,
         name,
-        role,
+        mode = "viewing",
       }: {
         roomId: string;
         name: string;
-        role: "presenter" | "viewer";
+        mode?: "presenting" | "viewing";
       }) => {
-        // Lazy-load room from manifest if not in memory
-        if (!rooms.has(roomId)) {
-          const loaded = await loadRoomFromManifest(roomId);
-          if (!loaded) {
-            socket.emit("error", { message: "Room not found" });
-            return;
-          }
-          rooms.set(roomId, loaded);
+        // Check if room exists in Redis
+        const exists = await roomExists(roomId);
+        if (!exists) {
+          console.log(`[WS] Room ${roomId} not found in Redis`);
+          socket.emit("error", { message: "Room not found" });
+          return;
         }
 
-        const room = rooms.get(roomId)!;
+        const roomMeta = await getRoomMeta(roomId);
+        if (!roomMeta) {
+          socket.emit("error", { message: "Room not found" });
+          return;
+        }
+
         socket.join(roomId);
-        socket.data = { roomId, name, role };
+        
+        const participant: Participant = { id: socket.id, name, mode };
+        addParticipant(roomId, participant);
+        socket.data = { roomId, name, mode };
 
-        if (role === "presenter") {
-          room.presenter = { id: socket.id, name };
-          console.log(`[WS] Presenter "${name}" joined room ${roomId}`);
-        } else {
-          room.viewers.set(socket.id, name);
-          io.to(roomId).emit("viewer-joined", { id: socket.id, name });
-          console.log(`[WS] Viewer "${name}" joined room ${roomId}`);
-        }
+        console.log(`[WS] "${name}" joined room ${roomId} in ${mode} mode`);
 
-        const viewers: Viewer[] = Array.from(room.viewers.entries()).map(
-          ([id, n]) => ({ id, name: n })
-        );
+        // Broadcast to others
+        const participants = getParticipants(roomId);
+        io.to(roomId).emit("participant-joined", { participant });
 
+        // Send current state to the new participant
         socket.emit("room-state", {
-          currentSlide: room.currentSlide,
-          totalSlides: room.totalSlides,
-          slides: room.slides,
-          presenterName: room.presenter?.name ?? "Unknown",
-          viewers,
+          currentSlide: roomMeta.currentSlide,
+          totalSlides: roomMeta.totalSlides,
+          slides: roomMeta.totalSlides, // Just send count
+          participants,
+          activePresenter: null, // TODO: track active presenter
         });
       }
     );
 
     socket.on(
-      "slide-change",
-      ({ roomId, slideIndex }: { roomId: string; slideIndex: number }) => {
-        const room = rooms.get(roomId);
-        if (!room) return;
-        if (room.presenter?.id !== socket.id) return;
+      "toggle-mode",
+      ({ roomId, mode }: { roomId: string; mode: "presenting" | "viewing" }) => {
+        const participants = getParticipants(roomId);
+        const participant = participants.find(p => p.id === socket.id);
+        if (!participant) return;
 
-        room.currentSlide = slideIndex;
-        io.to(roomId).emit("slide-update", { slideIndex });
-        console.log(`[WS] Room ${roomId}: slide → ${slideIndex}`);
+        participant.mode = mode;
+        updateParticipant(roomId, participant);
+
+        io.to(roomId).emit("participant-updated", { participant });
+        console.log(`[WS] ${participant.name} switched to ${mode} mode`);
       }
     );
 
+    socket.on(
+      "slide-change",
+      async ({ roomId, slideIndex }: { roomId: string; slideIndex: number }) => {
+        const participants = getParticipants(roomId);
+        const participant = participants.find(p => p.id === socket.id);
+        if (!participant || participant.mode !== "presenting") return;
+
+        await updateCurrentSlide(roomId, slideIndex);
+        io.to(roomId).emit("slide-update", { slideIndex, presenterId: socket.id });
+        console.log(`[WS] Room ${roomId}: slide → ${slideIndex} by ${participant.name}`);
+      }
+    );
+
+    socket.on(
+      "cursor-move",
+      ({ roomId, x, y }: { roomId: string; x: number; y: number }) => {
+        const participants = getParticipants(roomId);
+        const participant = participants.find(p => p.id === socket.id);
+        if (!participant || participant.mode !== "presenting") return;
+
+        participant.cursorX = x;
+        participant.cursorY = y;
+        updateParticipant(roomId, participant);
+
+        // Broadcast cursor position to others
+        socket.to(roomId).emit("cursor-update", {
+          participantId: socket.id,
+          name: participant.name,
+          x,
+          y,
+        });
+      }
+    );
+
+    socket.on(
+      "draw",
+      ({
+        roomId,
+        path,
+      }: {
+        roomId: string;
+        path: { x: number; y: number }[];
+      }) => {
+        const participants = getParticipants(roomId);
+        const participant = participants.find(p => p.id === socket.id);
+        if (!participant || participant.mode !== "presenting") return;
+
+        // Broadcast drawing to all participants
+        io.to(roomId).emit("draw-update", {
+          participantId: socket.id,
+          name: participant.name,
+          path,
+        });
+      }
+    );
+
+    socket.on("clear-drawings", ({ roomId }: { roomId: string }) => {
+      const participants = getParticipants(roomId);
+      const participant = participants.find(p => p.id === socket.id);
+      if (!participant || participant.mode !== "presenting") return;
+
+      io.to(roomId).emit("clear-drawings");
+      console.log(`[WS] Drawings cleared by ${participant.name}`);
+    });
+
     socket.on("end-session", ({ roomId }: { roomId: string }) => {
-      const room = rooms.get(roomId);
-      if (!room) return;
-      if (room.presenter?.id !== socket.id) return;
+      const participants = getParticipants(roomId);
+      const participant = participants.find(p => p.id === socket.id);
+      if (!participant) return;
 
       io.to(roomId).emit("session-ended", {});
-      rooms.delete(roomId);
-      console.log(`[WS] Room ${roomId} ended by presenter`);
+      console.log(`[WS] Room ${roomId} ended by ${participant.name}`);
     });
 
     socket.on("disconnect", () => {
-      const { roomId, name, role } = (socket.data ?? {}) as {
+      const { roomId, name } = (socket.data ?? {}) as {
         roomId?: string;
         name?: string;
-        role?: string;
       };
       if (!roomId) return;
 
-      const room = rooms.get(roomId);
-      if (!room) return;
-
-      if (role === "viewer") {
-        room.viewers.delete(socket.id);
-        io.to(roomId).emit("viewer-left", { id: socket.id, name });
-        console.log(`[WS] Viewer "${name}" left room ${roomId}`);
-      } else if (role === "presenter") {
-        io.to(roomId).emit("session-ended", {});
-        rooms.delete(roomId);
-        console.log(`[WS] Presenter disconnected — room ${roomId} closed`);
-      }
+      removeParticipant(roomId, socket.id);
+      io.to(roomId).emit("participant-left", { id: socket.id, name });
+      console.log(`[WS] ${name} left room ${roomId}`);
     });
   });
 

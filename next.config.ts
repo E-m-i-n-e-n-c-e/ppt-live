@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
   },
   // Disable x-powered-by header
   poweredByHeader: false,
+  // Allow HMR from 0.0.0.0 (for Docker/containers in dev mode)
+  allowedDevOrigins: ["0.0.0.0"],
 };
 
 export default nextConfig;
