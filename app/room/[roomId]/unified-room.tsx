@@ -406,6 +406,9 @@ export default function UnifiedRoom() {
   // ── Keyboard navigation ──────────────────────────────────────────────────────
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
       // Fullscreen toggle for everyone (F key)
       if (e.key === "f" || e.key === "F") {
         e.preventDefault();
@@ -421,7 +424,7 @@ export default function UnifiedRoom() {
         return;
       }
 
-      // Slide navigation only for presenters
+      // Slide navigation and presenter tools only for presenters
       if (myMode !== "presenting") return;
 
       if (e.key === "ArrowRight" || e.key === " ") {
@@ -432,10 +435,27 @@ export default function UnifiedRoom() {
         e.preventDefault();
         goTo(currentSlide - 1);
       }
+
+      // Tool shortcuts
+      if (e.key.toLowerCase() === "p") {
+        setActiveTool(activeTool === "pen" ? "none" : "pen");
+      }
+      if (e.key.toLowerCase() === "l") {
+        setActiveTool(activeTool === "laser" ? "none" : "laser");
+      }
+      if (e.key === "Backspace" || e.key === "Delete" || e.key.toLowerCase() === "c" || e.key.toLowerCase() === "e") {
+        clearAllDrawings();
+      }
+      if (e.key.toLowerCase() === "v") {
+        togglePointerVisibility();
+      }
+      if (e.key.toLowerCase() === "m") {
+        setShowCustomCursor(!showCustomCursor);
+      }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [currentSlide, state, myMode]);
+  }, [currentSlide, state, myMode, activeTool, isPointerVisible, showCustomCursor]);
 
   // ── Drawing canvas sync ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -974,6 +994,53 @@ export default function UnifiedRoom() {
                   </div>
                 </div>
 
+                {/* Keyboard Shortcuts */}
+                {myMode === "presenting" && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-2)", marginBottom: 8 }}>
+                      Keyboard Shortcuts
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                        <span style={{ color: "var(--text-2)" }}>Next / Prev Slide</span>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <kbd className={styles.kbd}>Space</kbd>
+                          <kbd className={styles.kbd}>←</kbd>
+                          <kbd className={styles.kbd}>→</kbd>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                        <span style={{ color: "var(--text-2)" }}>Toggle Pen</span>
+                        <kbd className={styles.kbd}>P</kbd>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                        <span style={{ color: "var(--text-2)" }}>Toggle Laser</span>
+                        <kbd className={styles.kbd}>L</kbd>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                        <span style={{ color: "var(--text-2)" }}>Clear Drawings</span>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <kbd className={styles.kbd}>E</kbd>
+                          <kbd className={styles.kbd}>C</kbd>
+                          <kbd className={styles.kbd}>DEL</kbd>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                        <span style={{ color: "var(--text-2)" }}>Toggle Pointer</span>
+                        <kbd className={styles.kbd}>V</kbd>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                        <span style={{ color: "var(--text-2)" }}>Custom Cursor</span>
+                        <kbd className={styles.kbd}>M</kbd>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                        <span style={{ color: "var(--text-2)" }}>Fullscreen</span>
+                        <kbd className={styles.kbd}>F</kbd>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ marginTop: "auto", paddingTop: 16 }}>
                   <button className="btn btn-danger" onClick={leaveSession} style={{ width: "100%" }}>
                     <LogOut size={14} /> Leave Session
@@ -1150,7 +1217,7 @@ export default function UnifiedRoom() {
                     className={styles.consoleBtn}
                     onClick={(e) => { e.stopPropagation(); goTo(currentSlide - 1); }}
                     disabled={currentSlide === 0 || myMode === "viewing"}
-                    title="Previous slide"
+                    title="Previous slide (←)"
                   >
                     <ChevronLeft size={16} />
                   </button>
@@ -1161,7 +1228,7 @@ export default function UnifiedRoom() {
                     className={styles.consoleBtn}
                     onClick={(e) => { e.stopPropagation(); goTo(currentSlide + 1); }}
                     disabled={currentSlide === state.totalSlides - 1 || myMode === "viewing"}
-                    title="Next slide"
+                    title="Next slide (Space/→)"
                   >
                     <ChevronRight size={16} />
                   </button>
@@ -1172,7 +1239,7 @@ export default function UnifiedRoom() {
                       <button
                         className={`${styles.consoleBtnLabeled} ${drawingEnabled ? styles.consoleBtnActive : ""}`}
                         onClick={() => setActiveTool(activeTool === "pen" ? "none" : "pen")}
-                        title="Pen"
+                        title="Pen (P)"
                       >
                         <Pen size={14} />
                         Pen
@@ -1180,7 +1247,7 @@ export default function UnifiedRoom() {
                       <button
                         className={`${styles.consoleBtnLabeled} ${laserEnabled ? styles.consoleBtnActive : ""}`}
                         onClick={() => setActiveTool(activeTool === "laser" ? "none" : "laser")}
-                        title="Laser"
+                        title="Laser (L)"
                       >
                         <Crosshair size={14} />
                         Laser
@@ -1189,7 +1256,7 @@ export default function UnifiedRoom() {
                         className={styles.consoleBtnLabeled}
                         onClick={clearAllDrawings}
                         disabled={drawings.length === 0}
-                        title="Clear drawings"
+                        title="Clear drawings (E/C/DEL)"
                       >
                         <Eraser size={14} />
                         Clear
@@ -1226,7 +1293,7 @@ export default function UnifiedRoom() {
                   <button
                     className={styles.consoleBtn}
                     onClick={toggleFullscreen}
-                    title="Exit fullscreen"
+                    title="Exit fullscreen (Esc/F)"
                   >
                     <Minimize2 size={16} />
                   </button>
@@ -1244,7 +1311,7 @@ export default function UnifiedRoom() {
                 className={styles.consoleBtn}
                 onClick={() => goTo(currentSlide - 1)}
                 disabled={currentSlide === 0}
-                title="Previous slide"
+                title="Previous slide (←)"
               >
                 <ChevronLeft size={16} />
               </button>
@@ -1255,7 +1322,7 @@ export default function UnifiedRoom() {
                 className={styles.consoleBtn}
                 onClick={() => goTo(currentSlide + 1)}
                 disabled={currentSlide === state.totalSlides - 1}
-                title="Next slide"
+                title="Next slide (Space/→)"
               >
                 <ChevronRight size={16} />
               </button>
@@ -1265,7 +1332,7 @@ export default function UnifiedRoom() {
               <button
                 className={`${styles.consoleBtnLabeled} ${drawingEnabled ? styles.consoleBtnActive : ""}`}
                 onClick={() => setActiveTool(activeTool === "pen" ? "none" : "pen")}
-                title="Toggle pen"
+                title="Toggle pen (P)"
               >
                 <Pen size={14} />
                 Pen
@@ -1273,7 +1340,7 @@ export default function UnifiedRoom() {
               <button
                 className={`${styles.consoleBtnLabeled} ${laserEnabled ? styles.consoleBtnActive : ""}`}
                 onClick={() => setActiveTool(activeTool === "laser" ? "none" : "laser")}
-                title="Toggle laser"
+                title="Toggle laser (L)"
               >
                 <Crosshair size={14} />
                 Laser
@@ -1281,7 +1348,7 @@ export default function UnifiedRoom() {
               <button
                 className={`${styles.consoleBtnLabeled} ${showCustomCursor ? styles.consoleBtnActive : ""}`}
                 onClick={() => setShowCustomCursor(!showCustomCursor)}
-                title="Toggle custom cursor"
+                title="Toggle custom cursor (M)"
               >
                 <MousePointer2 size={14} />
                 Cursor
@@ -1289,7 +1356,7 @@ export default function UnifiedRoom() {
               <button
                 className={`${styles.consoleBtnLabeled} ${isPointerVisible ? styles.consoleBtnActive : ""}`}
                 onClick={togglePointerVisibility}
-                title="Toggle pointer visibility"
+                title="Toggle pointer visibility (V)"
               >
                 {isPointerVisible ? <Eye size={14} /> : <EyeOff size={14} />}
                 Pointer
@@ -1301,14 +1368,14 @@ export default function UnifiedRoom() {
                 className={styles.consoleBtn}
                 onClick={clearAllDrawings}
                 disabled={drawings.length === 0}
-                title="Clear drawings"
+                title="Clear drawings (E/C/DEL)"
               >
                 <Eraser size={16} />
               </button>
               <button
                 className={styles.consoleBtn}
                 onClick={toggleFullscreen}
-                title="Fullscreen"
+                title="Fullscreen (F)"
               >
                 <Maximize2 size={16} />
               </button>
