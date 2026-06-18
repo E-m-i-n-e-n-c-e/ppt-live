@@ -821,6 +821,7 @@ export default function UnifiedRoom() {
     <div className={styles.root}>
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
       <aside className={`${styles.sidebar} ${sidebarHidden ? styles.sidebarCollapsed : ""}`}>
+        <div className={styles.sidebarInner}>
         <div className={styles.sideTop}>
           <a href="/" className={styles.logo}>
             ppt-live
@@ -995,6 +996,7 @@ export default function UnifiedRoom() {
             <span className={connected ? "live-dot" : ""} />
             {connected ? "Connected" : "Reconnecting…"}
           </div>
+        </div>
         </div>
       </aside>
 
