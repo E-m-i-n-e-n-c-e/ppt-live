@@ -42,7 +42,11 @@ export default function UnifiedRoom() {
 
   const roomId = params.roomId as string;
   const initialMode = (searchParams.get("mode") as "presenting" | "viewing") ?? "viewing";
-  const userName = searchParams.get("name") ?? "Guest";
+  const userName = searchParams.get("name") ?? "";
+  const tempName = searchParams.get("tempName") ?? "";
+
+  const [hasJoined, setHasJoined] = useState(!!searchParams.get("name"));
+  const [joinNameInput, setJoinNameInput] = useState(userName || tempName);
 
   const [state, setState] = useState<RoomState | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -115,11 +119,13 @@ export default function UnifiedRoom() {
 
   // ── Socket setup ────────────────────────────────────────────────────────────
   useEffect(() => {
+    if (!hasJoined) return;
+
     const socket = getSocket();
 
     socket.on("connect", () => {
       setConnected(true);
-      socket.emit("join-room", { roomId, name: userName, mode: myMode });
+      socket.emit("join-room", { roomId, name: appliedName, mode: myMode });
     });
 
     socket.on("room-state", (data: RoomState) => {
@@ -213,7 +219,7 @@ export default function UnifiedRoom() {
 
     if (socket.connected) {
       setConnected(true);
-      socket.emit("join-room", { roomId, name: userName, mode: myMode });
+      socket.emit("join-room", { roomId, name: appliedName, mode: myMode });
     }
 
     return () => {
@@ -230,7 +236,7 @@ export default function UnifiedRoom() {
       socket.off("session-ended");
       socket.off("error");
     };
-  }, [roomId, userName, myMode, showCustomCursor, isPointerVisible]);
+  }, [roomId, appliedName, myMode, showCustomCursor, isPointerVisible, hasJoined]);
 
   // Disconnect socket entirely on unmount (e.g. back button)
   useEffect(() => {
@@ -254,12 +260,21 @@ export default function UnifiedRoom() {
 
   // ── Sync URL Params ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!state) return;
     const url = new URL(window.location.href);
     url.searchParams.set("mode", myMode);
-    url.searchParams.set("name", appliedName);
+    
+    // Immediately remove tempName so it doesn't stay in the URL
+    if (url.searchParams.has("tempName")) {
+      url.searchParams.delete("tempName");
+    }
+
+    if (hasJoined && appliedName) {
+      url.searchParams.set("name", appliedName);
+    } else {
+      url.searchParams.delete("name");
+    }
     window.history.replaceState(null, "", url.toString());
-  }, [myMode, appliedName, state]);
+  }, [myMode, appliedName, hasJoined]);
 
   // ── Keyboard navigation ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -459,7 +474,7 @@ export default function UnifiedRoom() {
     if (currentPath.length > 0 && currentDrawingId) {
       // Ensure the finalized path is broadcasted (in case the last move was skipped by throttle)
       getSocket().emit("draw", { roomId, path: currentPath, slideIndex: currentSlide, drawingId: currentDrawingId });
-      
+
       // Already emitted during drawing, just save to local state
       setDrawingsBySlide((prev) => ({
         ...prev,
@@ -506,7 +521,7 @@ export default function UnifiedRoom() {
   };
 
   const copyJoinLink = () => {
-    const link = `${window.location.origin}/room/${roomId}?mode=viewing&name=Guest`;
+    const link = `${window.location.origin}/room/${roomId}`;
     if (!navigator.clipboard) {
       const textArea = document.createElement("textarea");
       textArea.value = link;
@@ -527,6 +542,77 @@ export default function UnifiedRoom() {
     disconnectSocket();
     router.push("/");
   };
+
+  if (!hasJoined) {
+    return (
+      <div className={styles.root}>
+        <div className={styles.centered} style={{ flexDirection: "column", gap: 24, padding: 20, width: "100%" }}>
+          <div className="card fade-up" style={{ width: "100%", maxWidth: 400, background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "24px" }}>
+            <div style={{ textAlign: "center", marginBottom: 24 }}>
+              <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Join Room</h2>
+              <p style={{ color: "var(--text-2)", fontFamily: "var(--mono)", letterSpacing: "0.1em" }}>{roomId}</p>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-2)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Role</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    className={`btn ${myMode === "viewing" ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => setMyMode("viewing")}
+                    style={{ flex: 1 }}
+                  >
+                    👁️ Viewing
+                  </button>
+                  <button
+                    className={`btn ${myMode === "presenting" ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => setMyMode("presenting")}
+                    style={{ flex: 1 }}
+                  >
+                    🎤 Presenting
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="join-name" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-2)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Your Name</label>
+                <input
+                  id="join-name"
+                  className="input"
+                  placeholder="How should we call you?"
+                  value={joinNameInput}
+                  onChange={(e) => setJoinNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && joinNameInput.trim()) {
+                      setAppliedName(joinNameInput.trim());
+                      setNewName(joinNameInput.trim());
+                      setHasJoined(true);
+                    }
+                  }}
+                  autoFocus
+                />
+              </div>
+
+              <button
+                className={`btn btn-primary`}
+                onClick={() => {
+                  if (joinNameInput.trim()) {
+                    setAppliedName(joinNameInput.trim());
+                    setNewName(joinNameInput.trim());
+                    setHasJoined(true);
+                  }
+                }}
+                disabled={!joinNameInput.trim()}
+                style={{ marginTop: 8, width: "100%" }}
+              >
+                Join Room
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (ended) {
     return (

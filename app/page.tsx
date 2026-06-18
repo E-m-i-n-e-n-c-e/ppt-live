@@ -79,7 +79,7 @@ export default function HomePage() {
       return;
     }
 
-    router.push(`/room/${code}?mode=viewing&name=${encodeURIComponent(name)}`);
+    router.push(`/room/${code}?mode=viewing&tempName=${encodeURIComponent(name)}`);
   };
 
   return (
