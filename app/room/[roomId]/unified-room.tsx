@@ -908,6 +908,7 @@ export default function UnifiedRoom() {
                 style={{
                   left: `${myCursor.x}%`,
                   top: `${myCursor.y}%`,
+                  transition: "none"
                 }}
               >
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
