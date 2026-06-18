@@ -402,8 +402,8 @@ export default function UnifiedRoom() {
 
   // ── Laser rAF loop ───────────────────────────────────────────────────────────
   useEffect(() => {
-    const HOLD_MS = 2000;
-    const FADE_MS = 1500;
+    const HOLD_MS = 600;
+    const FADE_MS = 500;
     let rafId: number;
 
     const drawStroke = (ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) => {
