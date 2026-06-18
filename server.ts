@@ -146,6 +146,14 @@ nextApp.prepare().then(() => {
       }
     );
 
+    socket.on("cursor-hide", ({ roomId }: { roomId: string }) => {
+      const participants = getParticipants(roomId);
+      const participant = participants.find(p => p.id === socket.id);
+      if (!participant || participant.mode !== "presenting") return;
+
+      socket.to(roomId).emit("cursor-hide", { participantId: socket.id });
+    });
+
     socket.on(
       "draw",
       ({

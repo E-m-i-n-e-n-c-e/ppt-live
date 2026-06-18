@@ -87,6 +87,7 @@ input, textarea { font-family: inherit; }
   font-weight: 600;
   transition: all var(--transition);
   white-space: nowrap;
+  outline: none;
 }
 
 .btn-primary {

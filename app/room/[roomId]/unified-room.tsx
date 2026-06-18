@@ -59,11 +59,51 @@ export default function UnifiedRoom() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState(userName);
+  const [appliedName, setAppliedName] = useState(userName);
   const [myCursor, setMyCursor] = useState<{ x: number; y: number } | null>(null);
-  const [showCustomCursor, setShowCustomCursor] = useState(true);
+  const [showCustomCursor, setShowCustomCursor] = useState(true); // Original feature: Custom vs Default look
+  const [isPointerVisible, setIsPointerVisible] = useState(false); // New feature: Broadcast pointer to everyone
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isOptionsOpen, setIsOptionsOpen] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<"info" | "slides">("info");
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const thumbRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const slideContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [stageDimensions, setStageDimensions] = useState({ width: 0, height: 0 });
+
+  // ── Calculate Strict 16:9 Dimensions ───────────────────────────────────────
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (!slideContainerRef.current) return;
+      const rect = slideContainerRef.current.getBoundingClientRect();
+      const containerAspect = rect.width / rect.height;
+      const imageAspect = 16 / 9;
+
+      let width = rect.width;
+      let height = rect.height;
+
+      if (containerAspect > imageAspect) {
+        // Container is wider -> pillarbox
+        height = rect.height;
+        width = height * imageAspect;
+      } else {
+        // Container is taller -> letterbox
+        width = rect.width;
+        height = width / imageAspect;
+      }
+
+      setStageDimensions({ width, height });
+    };
+
+    updateDimensions();
+    // Re-calculate after a brief delay for fullscreen transitions
+    setTimeout(updateDimensions, 50); 
+    
+    window.addEventListener("resize", updateDimensions);
+    return () => window.removeEventListener("resize", updateDimensions);
+  }, [isFullscreen]);
 
   // Get drawings for current slide
   const drawings = drawingsBySlide[currentSlide] || [];
@@ -79,7 +119,23 @@ export default function UnifiedRoom() {
 
     socket.on("room-state", (data: RoomState) => {
       setState(data);
-      setCurrentSlide(data.currentSlide);
+
+      const slideParam = searchParams.get("slide");
+      let initialTarget = data.currentSlide;
+
+      if (slideParam !== null && slideParam !== "") {
+        let requested = parseInt(slideParam, 10) - 1;
+        if (isNaN(requested)) requested = 0;
+        if (requested < 0) requested = 0;
+        if (requested >= data.totalSlides) requested = data.totalSlides - 1;
+        initialTarget = requested;
+
+        if (myMode === "presenting" && initialTarget !== data.currentSlide) {
+          socket.emit("slide-change", { roomId, slideIndex: initialTarget });
+        }
+      }
+
+      setCurrentSlide(initialTarget);
     });
 
     socket.on("participant-joined", ({ participant }: { participant: Participant }) => {
@@ -122,14 +178,18 @@ export default function UnifiedRoom() {
       });
     });
 
+    socket.on("cursor-hide", ({ participantId }: { participantId: string }) => {
+      setCursors((prev) => prev.filter((c) => c.participantId !== participantId));
+    });
+
     socket.on("draw-update", ({ participantId, name, path, slideIndex, drawingId }: DrawPath & { slideIndex: number; drawingId?: string }) => {
       setDrawingsBySlide((prev) => {
         const slideDrawings = prev[slideIndex] || [];
-        
+
         if (drawingId) {
           // Check if this drawing ID already exists
           const existingIndex = slideDrawings.findIndex(d => d.drawingId === drawingId);
-          
+
           if (existingIndex !== -1) {
             // Update existing drawing
             const updated = [...slideDrawings];
@@ -140,7 +200,7 @@ export default function UnifiedRoom() {
             };
           }
         }
-        
+
         // Add as new drawing
         return {
           ...prev,
@@ -175,22 +235,43 @@ export default function UnifiedRoom() {
       socket.off("participant-updated");
       socket.off("slide-update");
       socket.off("cursor-update");
+      socket.off("cursor-hide");
       socket.off("draw-update");
       socket.off("clear-drawings");
       socket.off("session-ended");
       socket.off("error");
     };
-  }, [roomId, userName, myMode]);
+  }, [roomId, userName, myMode, showCustomCursor, isPointerVisible]);
 
-  // ── Fullscreen state detection ──────────────────────────────────────────────
+  // Disconnect socket entirely on unmount (e.g. back button)
+  useEffect(() => {
+    return () => {
+      disconnectSocket();
+    };
+  }, []);
+
+  // Sync native fullscreen exits
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      if (!document.fullscreenElement) {
+        setIsFullscreen(false);
+      }
     };
-    
     document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
   }, []);
+
+  // ── Sync URL Params ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!state) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("mode", myMode);
+    url.searchParams.set("name", appliedName);
+    url.searchParams.set("slide", (currentSlide + 1).toString());
+    window.history.replaceState(null, "", url.toString());
+  }, [myMode, appliedName, currentSlide, state]);
 
   // ── Keyboard navigation ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -202,9 +283,14 @@ export default function UnifiedRoom() {
         return;
       }
 
+      if (e.key === "Escape") {
+        setIsFullscreen(false);
+        return;
+      }
+
       // Slide navigation only for presenters
       if (myMode !== "presenting") return;
-      
+
       if (e.key === "ArrowRight" || e.key === " ") {
         e.preventDefault();
         goTo(currentSlide + 1);
@@ -283,9 +369,33 @@ export default function UnifiedRoom() {
     getSocket().emit("toggle-mode", { roomId, mode: newMode });
   };
 
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const togglePointerVisibility = () => {
+    const nextState = !isPointerVisible;
+    setIsPointerVisible(nextState);
+    if (!nextState) {
+      getSocket().emit("cursor-hide", { roomId });
+      showToast("Pointer hidden from everyone");
+    } else {
+      showToast("Pointer visible to everyone");
+    }
+  };
+
   const toggleFullscreen = () => {
+    setIsFullscreen((prev) => !prev);
+    setIsOptionsOpen(false); // Close menu when exiting fullscreen
+  };
+
+  const triggerNativeFullscreen = () => {
     if (!document.fullscreenElement) {
-      slideContainerRef.current?.requestFullscreen();
+      document.documentElement.requestFullscreen().then(() => {
+        setIsFullscreen(true);
+      }).catch(err => console.error("Error attempting to enable full-screen mode:", err));
     } else {
       document.exitFullscreen();
     }
@@ -301,46 +411,48 @@ export default function UnifiedRoom() {
     // Update local cursor position
     setMyCursor({ x, y });
 
-    getSocket().emit("cursor-move", { roomId, x, y });
+    if (isPointerVisible) {
+      getSocket().emit("cursor-move", { roomId, x, y });
+    }
   };
 
   const handleDrawStart = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (myMode !== "presenting" || !drawingEnabled) return;
     setIsDrawing(true);
-    
+
     // Generate unique ID for this drawing session
     const drawingId = `${Date.now()}-${Math.random()}`;
     setCurrentDrawingId(drawingId);
-    
+
     const canvas = e.currentTarget;
     const rect = canvas.getBoundingClientRect();
-    
+
     // Calculate position relative to the actual displayed image size
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    
+
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
-    
+
     setCurrentPath([{ x, y }]);
   };
 
   const handleDrawMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing || myMode !== "presenting" || !currentDrawingId) return;
-    
+
     const canvas = e.currentTarget;
     const rect = canvas.getBoundingClientRect();
-    
+
     // Calculate position relative to the actual displayed image size
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    
+
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
-    
+
     const newPath = [...currentPath, { x, y }];
     setCurrentPath(newPath);
-    
+
     // Emit real-time drawing update with slide index and drawing ID
     getSocket().emit("draw", { roomId, path: newPath, slideIndex: currentSlide, drawingId: currentDrawingId });
   };
@@ -368,11 +480,12 @@ export default function UnifiedRoom() {
   };
 
   const handleNameChange = () => {
-    if (newName.trim() && newName !== userName) {
-      // TODO: Emit name change to server
-      getSocket().emit("update-name", { roomId, name: newName.trim() });
-      setIsEditingName(false);
+    const trimmed = newName.trim();
+    if (trimmed && trimmed !== appliedName) {
+      getSocket().emit("update-name", { roomId, name: trimmed });
+      setAppliedName(trimmed);
     }
+    setIsEditingName(false);
   };
 
   const copyRoomCode = () => {
@@ -411,8 +524,7 @@ export default function UnifiedRoom() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const endSession = () => {
-    getSocket().emit("end-session", { roomId });
+  const leaveSession = () => {
     disconnectSocket();
     router.push("/");
   };
@@ -442,7 +554,7 @@ export default function UnifiedRoom() {
   const viewers = state.participants.filter((p) => p.mode === "viewing");
 
   // Generate thumbnail URLs for slide strip
-  const slideUrls = Array.from({ length: state.totalSlides }, (_, i) => 
+  const slideUrls = Array.from({ length: state.totalSlides }, (_, i) =>
     `/api/slide/${roomId}/${i + 1}`
   );
 
@@ -454,130 +566,158 @@ export default function UnifiedRoom() {
           <a href="/" className={styles.logo}>
             ppt-live
           </a>
-
-          {/* Mode Toggle */}
-          <div className={styles.modeToggle}>
+          <div className={styles.tabs}>
             <button
-              className={`btn ${myMode === "presenting" ? "btn-primary" : "btn-ghost"}`}
-              onClick={toggleMode}
-              style={{ width: "100%", marginBottom: 8 }}
+              className={`${styles.tabBtn} ${sidebarTab === "info" ? styles.tabActive : ""}`}
+              onClick={() => setSidebarTab("info")}
             >
-              {myMode === "presenting" ? "🎤 Presenting" : "👁️ Viewing"}
+              Info
             </button>
-            <p style={{ fontSize: 11, color: "var(--text-2)", textAlign: "center" }}>
-              {myMode === "presenting"
-                ? "You can present & control slides"
-                : "Click to switch to presenting mode"}
-            </p>
-          </div>
-
-          {/* User Name */}
-          <div className={styles.nameCard}>
-            {isEditingName ? (
-              <div style={{ display: "flex", gap: 4 }}>
-                <input
-                  type="text"
-                  className="input"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleNameChange()}
-                  onBlur={handleNameChange}
-                  autoFocus
-                  style={{ flex: 1, fontSize: 13 }}
-                />
-              </div>
-            ) : (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>👤 {newName}</span>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => setIsEditingName(true)}
-                  style={{ fontSize: 11, padding: "4px 8px" }}
-                >
-                  Edit
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Room code */}
-          <div className={styles.codeCard}>
-            <div className={styles.codeLabel}>
-              <span className="live-dot" />
-              Room Code
-            </div>
-            <div className={styles.code}>{roomId}</div>
-            <div className={styles.codeActions}>
-              <button
-                className="btn btn-ghost"
-                onClick={copyRoomCode}
-                style={{ flex: 1, fontSize: 12 }}
-              >
-                {copied ? "✓ Copied" : "Copy Code"}
-              </button>
-              <button
-                className="btn btn-ghost"
-                onClick={copyJoinLink}
-                style={{ flex: 1, fontSize: 12 }}
-              >
-                Copy Link
-              </button>
-            </div>
-          </div>
-
-          {/* Participants */}
-          <div className={styles.viewersSection}>
-            <div className={styles.viewersHeader}>
-              <span>Participants</span>
-              <span className="badge badge-accent">{state.participants.length}</span>
-            </div>
-            <div className={styles.viewersList}>
-              {presenters.length > 0 && (
-                <>
-                  <p style={{ fontSize: 10, color: "var(--text-2)", margin: "8px 0 4px" }}>
-                    PRESENTING
-                  </p>
-                  {presenters.map((p) => (
-                    <div key={p.id} className={styles.viewer}>
-                      <div className={styles.avatar} style={{ background: "var(--accent)" }}>
-                        {p.name[0].toUpperCase()}
-                      </div>
-                      <span>{p.name}</span>
-                    </div>
-                  ))}
-                </>
-              )}
-              {viewers.length > 0 && (
-                <>
-                  <p style={{ fontSize: 10, color: "var(--text-2)", margin: "8px 0 4px" }}>
-                    VIEWING
-                  </p>
-                  {viewers.map((p) => (
-                    <div key={p.id} className={styles.viewer}>
-                      <div className={styles.avatar}>{p.name[0].toUpperCase()}</div>
-                      <span>{p.name}</span>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
+            <button
+              className={`${styles.tabBtn} ${sidebarTab === "slides" ? styles.tabActive : ""}`}
+              onClick={() => setSidebarTab("slides")}
+            >
+              Slides
+            </button>
           </div>
         </div>
 
-        {/* Slide strip */}
-        <div className={styles.slideStrip}>
-          {slideUrls.map((src, i) => (
-            <button
-              key={i}
-              className={`${styles.stripThumb} ${i === currentSlide ? styles.stripActive : ""}`}
-              onClick={() => myMode === "presenting" && goTo(i)}
-              disabled={myMode !== "presenting"}
-              title={`Slide ${i + 1}`}
-            >
-              <img src={src} alt={`Slide ${i + 1}`} />
-              <span className={styles.thumbNum}>{i + 1}</span>
-            </button>
-          ))}
+        <div className={styles.sideContent}>
+          {sidebarTab === "info" ? (
+            <>
+              {/* Mode Toggle */}
+              <div className={styles.modeToggle}>
+                <button
+                  className={`btn ${myMode === "presenting" ? "btn-primary" : "btn-ghost"}`}
+                  onClick={toggleMode}
+                  style={{ width: "100%", marginBottom: 8 }}
+                >
+                  {myMode === "presenting" ? "🎤 Presenting" : "👁️ Viewing"}
+                </button>
+                <p style={{ fontSize: 11, color: "var(--text-2)", textAlign: "center" }}>
+                  {myMode === "presenting"
+                    ? "You can present & control slides"
+                    : "Click to switch to presenting mode"}
+                </p>
+              </div>
+
+              {/* User Name */}
+              <div className={styles.nameCard}>
+                {isEditingName ? (
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <input
+                      type="text"
+                      className="input"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleNameChange()}
+                      onBlur={handleNameChange}
+                      autoFocus
+                      style={{ flex: 1, fontSize: 13 }}
+                    />
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>👤 {newName}</span>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => setIsEditingName(true)}
+                      style={{ fontSize: 11, padding: "4px 8px" }}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Room code */}
+              <div className={styles.codeCard}>
+                <div className={styles.codeLabel}>
+                  <span className="live-dot" />
+                  Room Code
+                </div>
+                <div className={styles.code}>{roomId}</div>
+                <div className={styles.codeActions}>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={copyRoomCode}
+                    style={{ flex: 1, fontSize: 12 }}
+                  >
+                    {copied ? "✓ Copied" : "Copy Code"}
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={copyJoinLink}
+                    style={{ flex: 1, fontSize: 12 }}
+                  >
+                    Copy Link
+                  </button>
+                </div>
+              </div>
+
+              {/* Participants */}
+              <div className={styles.viewersSection}>
+                <div className={styles.viewersHeader}>
+                  <span>Participants</span>
+                  <span className="badge badge-accent">{state.participants.length}</span>
+                </div>
+                <div className={styles.viewersList}>
+                  {presenters.length > 0 && (
+                    <>
+                      <p style={{ fontSize: 10, color: "var(--text-2)", margin: "8px 0 4px" }}>
+                        PRESENTING
+                      </p>
+                      {presenters.map((p) => (
+                        <div key={p.id} className={styles.viewer}>
+                          <div className={styles.avatar} style={{ background: "var(--accent)" }}>
+                            {p.name[0].toUpperCase()}
+                          </div>
+                          <span>{p.name}</span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  {viewers.length > 0 && (
+                    <>
+                      <p style={{ fontSize: 10, color: "var(--text-2)", margin: "8px 0 4px" }}>
+                        VIEWING
+                      </p>
+                      {viewers.map((p) => (
+                        <div key={p.id} className={styles.viewer}>
+                          <div className={styles.avatar}>{p.name[0].toUpperCase()}</div>
+                          <span>{p.name}</span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ marginTop: "auto", paddingTop: 16 }}>
+                <button className="btn btn-danger" onClick={leaveSession} style={{ width: "100%" }}>
+                  Leave Session
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className={styles.slideStrip}>
+              {slideUrls.map((src, i) => (
+                <button
+                  key={i}
+                  ref={(el) => {
+                    thumbRefs.current[i] = el;
+                  }}
+                  className={`${styles.stripThumb} ${i === currentSlide ? styles.stripActive : ""}`}
+                  onClick={() => myMode === "presenting" && goTo(i)}
+                  disabled={myMode !== "presenting"}
+                  title={`Slide ${i + 1}`}
+                >
+                  <img src={src} alt={`Slide ${i + 1}`} />
+                  <span className={styles.thumbNum}>{i + 1}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className={styles.sideBottom}>
@@ -585,9 +725,6 @@ export default function UnifiedRoom() {
             <span className={connected ? "live-dot" : ""} />
             {connected ? "Connected" : "Reconnecting…"}
           </div>
-          <button className="btn btn-danger" onClick={endSession} style={{ width: "100%" }}>
-            Leave Session
-          </button>
         </div>
       </aside>
 
@@ -595,80 +732,152 @@ export default function UnifiedRoom() {
       <div className={styles.stage}>
         <div
           ref={slideContainerRef}
-          className={styles.slideWrap}
-          onMouseMove={handleMouseMove}
-          style={{ position: "relative", cursor: myMode === "presenting" && showCustomCursor ? "none" : "default" }}
+          className={`${styles.slideWrap} ${isFullscreen ? styles.theaterMode : ""}`}
+          style={{ cursor: myMode === "presenting" && showCustomCursor ? "none" : "default" }}
         >
-          <img
-            key={slideUrl}
-            src={slideUrl}
-            alt={`Slide ${currentSlide + 1}`}
-            className={styles.slideImg}
-          />
-
-          {/* Drawing Canvas */}
-          <canvas
-            ref={canvasRef}
-            className={styles.drawingCanvas}
-            width={1920}
-            height={1080}
-            onMouseDown={handleDrawStart}
-            onMouseMove={handleDrawMove}
-            onMouseUp={handleDrawEnd}
-            onMouseLeave={handleDrawEnd}
+          <div 
+            className={styles.stageContent} 
+            onMouseMove={handleMouseMove}
             style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              height: "100%",
-              cursor: drawingEnabled && myMode === "presenting" ? "crosshair" : "default",
-              pointerEvents: drawingEnabled && myMode === "presenting" ? "auto" : "none",
+              width: stageDimensions.width ? `${stageDimensions.width}px` : "100%",
+              height: stageDimensions.height ? `${stageDimensions.height}px` : "100%",
             }}
-          />
+          >
+            <img
+              key={slideUrl}
+              src={slideUrl}
+              alt={`Slide ${currentSlide + 1}`}
+              className={styles.slideImg}
+            />
 
-          {/* Other presenters' cursors */}
-          {cursors.map((cursor) => (
-            <div
-              key={cursor.participantId}
-              className={styles.remoteCursor}
+            {/* Drawing Canvas */}
+            <canvas
+              ref={canvasRef}
+              className={styles.drawingCanvas}
+              width={1920}
+              height={1080}
+              onMouseDown={handleDrawStart}
+              onMouseMove={handleDrawMove}
+              onMouseUp={handleDrawEnd}
+              onMouseLeave={handleDrawEnd}
               style={{
-                left: `${cursor.x}%`,
-                top: `${cursor.y}%`,
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                cursor: drawingEnabled && myMode === "presenting" ? "crosshair" : "default",
+                pointerEvents: drawingEnabled && myMode === "presenting" ? "auto" : "none",
               }}
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <path
-                  d="M5 3L15 10L9 11L7 17L5 3Z"
-                  fill="var(--accent)"
-                  stroke="white"
-                  strokeWidth="1"
-                />
-              </svg>
-              <span className={styles.cursorName}>{cursor.name}</span>
-            </div>
-          ))}
+            />
 
-          {/* My own cursor (when presenting, custom cursor enabled, and not drawing) */}
-          {myMode === "presenting" && myCursor && showCustomCursor && !drawingEnabled && (
-            <div
-              className={styles.remoteCursor}
-              style={{
-                left: `${myCursor.x}%`,
-                top: `${myCursor.y}%`,
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <path
-                  d="M5 3L15 10L9 11L7 17L5 3Z"
-                  fill="var(--accent)"
-                  stroke="white"
-                  strokeWidth="1"
-                />
-              </svg>
-              <span className={styles.cursorName}>{newName} (You)</span>
-            </div>
-          )}
+            {/* Other presenters' cursors */}
+            {cursors.map((cursor) => (
+              <div
+                key={cursor.participantId}
+                className={styles.remoteCursor}
+                style={{
+                  left: `${cursor.x}%`,
+                  top: `${cursor.y}%`,
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path
+                    d="M5 3L15 10L9 11L7 17L5 3Z"
+                    fill="var(--accent)"
+                    stroke="white"
+                    strokeWidth="1"
+                  />
+                </svg>
+                <span className={styles.cursorName}>{cursor.name}</span>
+              </div>
+            ))}
+
+            {/* My own cursor (when presenting, custom cursor enabled, pointer visible, and not drawing) */}
+            {myMode === "presenting" && myCursor && showCustomCursor && isPointerVisible && !drawingEnabled && (
+              <div
+                className={styles.remoteCursor}
+                style={{
+                  left: `${myCursor.x}%`,
+                  top: `${myCursor.y}%`,
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path
+                    d="M5 3L15 10L9 11L7 17L5 3Z"
+                    fill="var(--accent)"
+                    stroke="white"
+                    strokeWidth="1"
+                  />
+                </svg>
+                <span className={styles.cursorName}>{newName} (You)</span>
+              </div>
+            )}
+
+            {/* Google Slides style floating toolbar - ONLY in fullscreen */}
+            {isFullscreen && (
+              <div className={styles.floatingToolbarZone}>
+                <div className={styles.floatingToolbar}>
+                  <button
+                    className={styles.toolbarBtn}
+                    onClick={(e) => { e.stopPropagation(); goTo(currentSlide - 1); }}
+                    disabled={currentSlide === 0 || myMode === "viewing"}
+                    title="Previous Slide"
+                  >
+                    ◀
+                  </button>
+                  <span className={styles.toolbarSlideNum}>
+                    Slide {currentSlide + 1}
+                  </span>
+                  <button
+                    className={styles.toolbarBtn}
+                    onClick={(e) => { e.stopPropagation(); goTo(currentSlide + 1); }}
+                    disabled={currentSlide === state.totalSlides - 1 || myMode === "viewing"}
+                    title="Next Slide"
+                  >
+                    ▶
+                  </button>
+
+                  <div style={{ position: "relative" }}>
+                    <button
+                      className={styles.toolbarBtn}
+                      onClick={(e) => { e.stopPropagation(); setIsOptionsOpen(!isOptionsOpen); }}
+                      title="Options"
+                    >
+                      ⋮
+                    </button>
+
+                    {isOptionsOpen && (
+                      <div className={styles.optionsMenu}>
+                        {myMode === "presenting" && (
+                          <>
+                            <button onClick={(e) => { e.stopPropagation(); togglePointerVisibility(); setIsOptionsOpen(false); }}>
+                              {isPointerVisible ? "Hide pointer" : "Show pointer"}
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); setShowCustomCursor(!showCustomCursor); setIsOptionsOpen(false); }}>
+                              {showCustomCursor ? "Use default cursor" : "Use custom cursor"}
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); setDrawingEnabled(!drawingEnabled); setIsOptionsOpen(false); }}>
+                              {drawingEnabled ? "Turn off pen" : "Turn on pen"}
+                            </button>
+                            {drawings.length > 0 && (
+                              <button onClick={(e) => { e.stopPropagation(); clearAllDrawings(); setIsOptionsOpen(false); }}>
+                                Clear drawings
+                              </button>
+                            )}
+                            <div className={styles.menuDivider} />
+                          </>
+                        )}
+                        <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}>
+                          Exit full screen
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Controls */}
@@ -688,6 +897,16 @@ export default function UnifiedRoom() {
             </div>
 
             <button
+              className="btn btn-ghost"
+              onClick={() => goTo(currentSlide + 1)}
+              disabled={currentSlide === state.totalSlides - 1}
+            >
+              Next →
+            </button>
+
+            <div style={{ width: "1px", height: "24px", background: "var(--border)", margin: "0 8px" }} />
+
+            <button
               className={`btn ${drawingEnabled ? "btn-primary" : "btn-ghost"}`}
               onClick={() => setDrawingEnabled(!drawingEnabled)}
               title="Toggle drawing mode"
@@ -703,6 +922,14 @@ export default function UnifiedRoom() {
               {showCustomCursor ? "🖱️ Custom" : "🖱️ Default"}
             </button>
 
+            <button
+              className={`btn ${isPointerVisible ? "btn-primary" : "btn-ghost"}`}
+              onClick={togglePointerVisibility}
+              title="Toggle pointer broadcasting"
+            >
+              {isPointerVisible ? "👁️ Pointer On" : "👁️ Pointer Off"}
+            </button>
+
             {drawings.length > 0 && (
               <button className="btn btn-ghost" onClick={clearAllDrawings}>
                 🗑️ Clear
@@ -711,14 +938,6 @@ export default function UnifiedRoom() {
 
             <button className="btn btn-ghost" onClick={toggleFullscreen}>
               {isFullscreen ? "⛶ Exit" : "⛶ Fullscreen"}
-            </button>
-
-            <button
-              className="btn btn-primary"
-              onClick={() => goTo(currentSlide + 1)}
-              disabled={currentSlide === state.totalSlides - 1}
-            >
-              Next →
             </button>
           </div>
         )}
@@ -730,7 +949,10 @@ export default function UnifiedRoom() {
               Watching {presenters.length > 0 ? presenters[0].name : "presentation"}
             </div>
             <button className="btn btn-ghost" onClick={toggleFullscreen}>
-              {isFullscreen ? "⛶ Exit Fullscreen" : "⛶ Fullscreen"}
+              {isFullscreen ? "⛶ Exit Theater" : "⛶ Theater"}
+            </button>
+            <button className="btn btn-primary" onClick={triggerNativeFullscreen}>
+              🖥️ Takeover
             </button>
           </div>
         )}
@@ -740,6 +962,13 @@ export default function UnifiedRoom() {
             ? "← → or Spacebar to navigate · F for fullscreen"
             : "Press F for fullscreen"}
         </p>
+
+        {/* Toast Notification */}
+        {toastMessage && (
+          <div className={styles.toast}>
+            {toastMessage}
+          </div>
+        )}
       </div>
     </div>
   );
