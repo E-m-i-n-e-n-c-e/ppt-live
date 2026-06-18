@@ -35,6 +35,11 @@
   --mono: "JetBrains Mono", monospace;
 
   --transition: 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+
+  --overlay:        rgba(13, 18, 32, 0.80);
+  --overlay-2:      rgba(8,  12, 20, 0.90);
+  --overlay-border: rgba(255, 255, 255, 0.10);
+  --overlay-blur:   blur(20px);
 }
 
 /* ─── Reset ──────────────────────────────────────────────────────────────── */
@@ -210,4 +215,12 @@ input, textarea { font-family: inherit; }
   position: relative;
   z-index: 1;
   min-height: 100dvh;
+}
+
+/* ─── Reduced motion ──────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

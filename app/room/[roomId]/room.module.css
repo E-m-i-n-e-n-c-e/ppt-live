@@ -13,23 +13,57 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.3s ease;
+}
+
+.sidebarCollapsed {
+  width: 0;
+  border-right: none;
 }
 
 .sideTop {
   padding: 20px 16px 16px;
   flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebarToggle {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-2);
+  transition: background 0.15s, color 0.15s;
+}
+.sidebarToggle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .tabs {
   display: flex;
+  width: 100%;
   background: var(--bg-3);
   border-radius: var(--radius-sm);
   padding: 4px;
-  margin-top: 16px;
+  margin-top: 8px;
 }
 
 .tabBtn {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 6px 0;
   font-size: 13px;
   font-weight: 600;
@@ -225,6 +259,7 @@
 /* ── Stage ──────────────────────────────────────────────────────────────────── */
 .stage {
   flex: 1;
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -245,6 +280,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: max-width 0.3s ease;
 }
 
 .slideWrap.theaterMode {
@@ -256,6 +292,34 @@
   max-width: none;
   border-radius: 0;
   z-index: 9999;
+}
+
+.slideWrapWide {
+  max-width: min(1600px, 95vw);
+}
+
+.floatingReveal {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--overlay);
+  backdrop-filter: blur(var(--overlay-blur));
+  -webkit-backdrop-filter: blur(var(--overlay-blur));
+  border: 1px solid var(--overlay-border);
+  cursor: pointer;
+  color: var(--text-2);
+  transition: background 0.15s, color 0.15s;
+}
+.floatingReveal:hover {
+  background: var(--overlay-2);
+  color: var(--text);
 }
 
 .stageContent {
@@ -308,24 +372,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.slideCounter {
-  min-width: 80px;
-  text-align: center;
-}
-
-.slideNum {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.slideTotal {
-  font-size: 16px;
-  color: var(--text-2);
 }
 
 .keyHint {
@@ -454,180 +500,169 @@
   }
 }
 
-/* ── Google Slides Style Floating Toolbar ─────────────────────────────────── */
+/* ── Fullscreen / Windowed Console ──────────────────────────────────────── */
 
-.floatingToolbarZone {
+/* Fullscreen: centered bottom zone with idle-hide */
+.consoleZone {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  padding: 40px;
-  padding-bottom: 24px;
-  padding-left: 24px;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 10000;
-  cursor: default;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
-.floatingToolbarZoneRight {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  padding: 40px;
-  padding-bottom: 24px;
-  padding-right: 24px;
-  z-index: 10000;
-  cursor: default;
-}
-
-.toolbarBtnActive {
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
-}
-
-.floatingToolbarZoneRight .floatingToolbar {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* ── Bottom-right presenter pen overlay ──────────────────────────────────── */
-
-.penToolbar {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.penToolBtn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 16px;
-  border-radius: 100px;
-  background: rgba(15, 15, 15, 0.75);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
-  color: rgba(255, 255, 255, 0.65);
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
-  white-space: nowrap;
-  line-height: 1;
-}
-
-.penToolBtn:hover:not(:disabled) {
-  background: rgba(30, 30, 30, 0.92);
-  border-color: rgba(255, 255, 255, 0.22);
-  color: #fff;
-}
-
-.penToolBtn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-.penToolBtnActive {
-  background: rgba(10, 10, 10, 0.95);
-  border-color: rgba(255, 255, 255, 0.45);
-  color: #fff;
-  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-}
-
-.floatingToolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba(30, 30, 30, 0.85);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 6px;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+.consoleZoneHidden {
   opacity: 0;
-  transform: translateY(10px);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateX(-50%) translateY(8px);
+  pointer-events: none;
 }
 
-.floatingToolbarZone:hover .floatingToolbar,
-.floatingToolbar:focus-within {
-  opacity: 1;
-  transform: translateY(0);
+/* Shared console bar */
+.console {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--overlay);
+  backdrop-filter: var(--overlay-blur);
+  -webkit-backdrop-filter: var(--overlay-blur);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius);
+  padding: 5px 6px;
+  box-shadow: var(--shadow-lg);
 }
 
-.toolbarBtn {
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.8);
-  width: 32px;
-  height: 32px;
-  border-radius: 4px;
+/* Icon-only button */
+.consoleBtn {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  transition: background var(--transition), color var(--transition);
+  flex-shrink: 0;
   cursor: pointer;
-  transition: all 0.15s ease;
-  font-size: 14px;
 }
 
-.toolbarBtn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
+.consoleBtn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
-.toolbarBtn:disabled {
+.consoleBtn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
 }
 
-.toolbarSlideNum {
+/* Labeled button (icon + text) */
+.consoleBtnLabeled {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: transparent;
+  border: none;
   font-size: 13px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.9);
-  padding: 0 8px;
-  min-width: 60px;
-  text-align: center;
+  white-space: nowrap;
+  transition: background var(--transition), color var(--transition);
+  cursor: pointer;
 }
 
+.consoleBtnLabeled:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.consoleBtnLabeled:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Active tool — indigo glow */
+.consoleBtnActive {
+  background: var(--accent-dim) !important;
+  color: var(--accent-light) !important;
+  box-shadow: inset 0 0 0 1px var(--accent-glow);
+}
+
+/* Slide counter */
+.consoleSlidNum {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  padding: 0 6px;
+  min-width: 48px;
+  text-align: center;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Vertical divider between console groups */
+.consoleDivider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* Options dropdown */
 .optionsMenu {
   position: absolute;
   bottom: calc(100% + 8px);
-  left: 0;
-  background: rgba(30, 30, 30, 0.85);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--overlay-2);
+  backdrop-filter: var(--overlay-blur);
+  -webkit-backdrop-filter: var(--overlay-blur);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-sm);
   padding: 6px;
-  min-width: 160px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  min-width: 180px;
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   gap: 2px;
+  z-index: 10001;
 }
 
 .optionsMenu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-2);
   padding: 8px 12px;
   text-align: left;
   border-radius: 4px;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background var(--transition), color var(--transition);
+  width: 100%;
 }
 
-.optionsMenu button:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
+.optionsMenu button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.optionsMenu button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .menuDivider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--border);
   margin: 4px 0;
 }

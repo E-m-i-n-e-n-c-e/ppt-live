@@ -5,6 +5,12 @@ import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { getSocket, disconnectSocket } from "@/lib/socket";
 import styles from "./room.module.css";
 import { getStroke } from "perfect-freehand";
+import {
+  ChevronLeft, ChevronRight, Pen, Crosshair, Eraser,
+  Maximize2, Minimize2, MoreVertical, MousePointer2,
+  Eye, EyeOff, Mic, User, Copy, Check, LogOut,
+  Info, LayoutGrid, Monitor, PanelLeftClose, PanelLeftOpen,
+} from "lucide-react";
 
 const LASER_STROKE_OPTIONS = {
   size: 6,
@@ -101,7 +107,8 @@ export default function UnifiedRoom() {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [slideDirection, setSlideDirection] = useState<"next" | "prev">("next");
   const [myMode, setMyMode] = useState<"presenting" | "viewing">(initialMode);
-  const [copied, setCopied] = useState(false);
+  const [copiedType, setCopiedType] = useState<null | "code" | "link">(null);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
   const [connected, setConnected] = useState(false);
   const [ended, setEnded] = useState(false);
   const [cursors, setCursors] = useState<CursorPosition[]>([]);
@@ -122,6 +129,9 @@ export default function UnifiedRoom() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<"info" | "slides">("info");
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isOptionsOpenRef = useRef(false);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const thumbRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -163,11 +173,11 @@ export default function UnifiedRoom() {
     };
 
     updateDimensions();
-    // Re-calculate after a brief delay for fullscreen transitions
-    setTimeout(updateDimensions, 50);
 
-    window.addEventListener("resize", updateDimensions);
-    return () => window.removeEventListener("resize", updateDimensions);
+    const observer = new ResizeObserver(updateDimensions);
+    if (slideContainerRef.current) observer.observe(slideContainerRef.current);
+
+    return () => observer.disconnect();
   }, [isFullscreen]);
 
   // Get drawings for current slide
@@ -330,6 +340,46 @@ export default function UnifiedRoom() {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
   }, []);
+
+  // Keep isOptionsOpenRef in sync so idle-hide closure can read it without re-subscribing
+  useEffect(() => {
+    isOptionsOpenRef.current = isOptionsOpen;
+  }, [isOptionsOpen]);
+
+  // Keynote-style idle auto-hide for fullscreen controls + cursor
+  useEffect(() => {
+    if (!isFullscreen) {
+      setControlsVisible(true);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      return;
+    }
+
+    const REVEAL_ZONE = 160; // px from bottom edge
+    const resetTimer = (e?: MouseEvent) => {
+      const nearConsole = !e || e.clientY >= window.innerHeight - REVEAL_ZONE;
+      if (!nearConsole) return;
+      setControlsVisible(true);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (!isOptionsOpenRef.current) {
+        idleTimerRef.current = setTimeout(() => setControlsVisible(false), 2500);
+      }
+    };
+
+    resetTimer(); // show immediately on fullscreen entry
+    window.addEventListener("mousemove", resetTimer);
+    return () => {
+      window.removeEventListener("mousemove", resetTimer);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, [isFullscreen]);
+
+  // Keep controls visible while the options menu is open
+  useEffect(() => {
+    if (isOptionsOpen && isFullscreen) {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      setControlsVisible(true);
+    }
+  }, [isOptionsOpen, isFullscreen]);
 
   // ── Sync URL Params ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -635,13 +685,13 @@ export default function UnifiedRoom() {
       textArea.select();
       document.execCommand("copy");
       document.body.removeChild(textArea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopiedType("code");
+      setTimeout(() => setCopiedType(null), 2000);
       return;
     }
     navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedType("code");
+    setTimeout(() => setCopiedType(null), 2000);
   };
 
   const copyJoinLink = () => {
@@ -653,13 +703,13 @@ export default function UnifiedRoom() {
       textArea.select();
       document.execCommand("copy");
       document.body.removeChild(textArea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopiedType("link");
+      setTimeout(() => setCopiedType(null), 2000);
       return;
     }
     navigator.clipboard.writeText(link);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedType("link");
+    setTimeout(() => setCopiedType(null), 2000);
   };
 
   const leaveSession = () => {
@@ -686,14 +736,14 @@ export default function UnifiedRoom() {
                     onClick={() => setMyMode("viewing")}
                     style={{ flex: 1 }}
                   >
-                    👁️ Viewing
+                    <Eye size={14} /> Viewing
                   </button>
                   <button
                     className={`btn ${myMode === "presenting" ? "btn-primary" : "btn-ghost"}`}
                     onClick={() => setMyMode("presenting")}
                     style={{ flex: 1 }}
                   >
-                    🎤 Presenting
+                    <Mic size={14} /> Presenting
                   </button>
                 </div>
               </div>
@@ -770,22 +820,31 @@ export default function UnifiedRoom() {
   return (
     <div className={styles.root}>
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
-      <aside className={styles.sidebar}>
+      <aside className={`${styles.sidebar} ${sidebarHidden ? styles.sidebarCollapsed : ""}`}>
         <div className={styles.sideTop}>
           <a href="/" className={styles.logo}>
             ppt-live
           </a>
+          <button
+            className={styles.sidebarToggle}
+            onClick={() => setSidebarHidden(true)}
+            title="Hide sidebar"
+          >
+            <PanelLeftClose size={15} />
+          </button>
           <div className={styles.tabs}>
             <button
               className={`${styles.tabBtn} ${sidebarTab === "info" ? styles.tabActive : ""}`}
               onClick={() => setSidebarTab("info")}
             >
+              <Info size={13} />
               Info
             </button>
             <button
               className={`${styles.tabBtn} ${sidebarTab === "slides" ? styles.tabActive : ""}`}
               onClick={() => setSidebarTab("slides")}
             >
+              <LayoutGrid size={13} />
               Slides
             </button>
           </div>
@@ -801,7 +860,7 @@ export default function UnifiedRoom() {
                   onClick={toggleMode}
                   style={{ width: "100%", marginBottom: 8 }}
                 >
-                  {myMode === "presenting" ? "🎤 Presenting" : "👁️ Viewing"}
+                  {myMode === "presenting" ? <><Mic size={14} /> Presenting</> : <><Eye size={14} /> Viewing</>}
                 </button>
                 <p style={{ fontSize: 11, color: "var(--text-2)", textAlign: "center" }}>
                   {myMode === "presenting"
@@ -827,7 +886,9 @@ export default function UnifiedRoom() {
                   </div>
                 ) : (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>👤 {newName}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                      <User size={13} style={{ opacity: 0.6 }} /> {newName}
+                    </span>
                     <button
                       className="btn btn-ghost"
                       onClick={() => setIsEditingName(true)}
@@ -850,16 +911,16 @@ export default function UnifiedRoom() {
                   <button
                     className="btn btn-ghost"
                     onClick={copyRoomCode}
-                    style={{ flex: 1, fontSize: 12 }}
+                    style={{ flex: 1, fontSize: 12, padding: "8px 10px", minWidth: 0 }}
                   >
-                    {copied ? "✓ Copied" : "Copy Code"}
+                    {copiedType === "code" ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy Code</>}
                   </button>
                   <button
                     className="btn btn-ghost"
                     onClick={copyJoinLink}
-                    style={{ flex: 1, fontSize: 12 }}
+                    style={{ flex: 1, fontSize: 12, padding: "8px 10px", minWidth: 0 }}
                   >
-                    Copy Link
+                    {copiedType === "link" ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy Link</>}
                   </button>
                 </div>
               </div>
@@ -904,7 +965,7 @@ export default function UnifiedRoom() {
 
               <div style={{ marginTop: "auto", paddingTop: 16 }}>
                 <button className="btn btn-danger" onClick={leaveSession} style={{ width: "100%" }}>
-                  Leave Session
+                  <LogOut size={14} /> Leave Session
                 </button>
               </div>
             </>
@@ -939,10 +1000,19 @@ export default function UnifiedRoom() {
 
       {/* ── Main stage ──────────────────────────────────────────────────── */}
       <div className={styles.stage}>
+        {sidebarHidden && !isFullscreen && (
+          <button
+            className={styles.floatingReveal}
+            onClick={() => setSidebarHidden(false)}
+            title="Show sidebar"
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+        )}
         <div
           ref={slideContainerRef}
-          className={`${styles.slideWrap} ${isFullscreen ? styles.theaterMode : ""}`}
-          style={{ cursor: myMode === "presenting" && showCustomCursor ? "none" : "default" }}
+          className={`${styles.slideWrap} ${isFullscreen ? styles.theaterMode : ""} ${sidebarHidden && !isFullscreen ? styles.slideWrapWide : ""}`}
+          style={{ cursor: (myMode === "presenting" && showCustomCursor) || (isFullscreen && !controlsVisible) ? "none" : "default" }}
         >
           <div
             className={styles.stageContent}
@@ -1053,97 +1123,103 @@ export default function UnifiedRoom() {
               </div>
             )}
 
-            {/* Google Slides style floating toolbar - ONLY in fullscreen */}
+            {/* Fullscreen console — Keynote-style idle auto-hide */}
             {isFullscreen && (
-              <>
-              <div className={styles.floatingToolbarZone}>
-                <div className={styles.floatingToolbar}>
+              <div className={`${styles.consoleZone} ${controlsVisible ? "" : styles.consoleZoneHidden}`}>
+                <div className={styles.console}>
+                  {/* Slide nav */}
                   <button
-                    className={styles.toolbarBtn}
+                    className={styles.consoleBtn}
                     onClick={(e) => { e.stopPropagation(); goTo(currentSlide - 1); }}
                     disabled={currentSlide === 0 || myMode === "viewing"}
-                    title="Previous Slide"
+                    title="Previous slide"
                   >
-                    ◀
+                    <ChevronLeft size={16} />
                   </button>
-                  <span className={styles.toolbarSlideNum}>
-                    Slide {currentSlide + 1}
+                  <span className={styles.consoleSlidNum}>
+                    {currentSlide + 1} / {state.totalSlides}
                   </span>
                   <button
-                    className={styles.toolbarBtn}
+                    className={styles.consoleBtn}
                     onClick={(e) => { e.stopPropagation(); goTo(currentSlide + 1); }}
                     disabled={currentSlide === state.totalSlides - 1 || myMode === "viewing"}
-                    title="Next Slide"
+                    title="Next slide"
                   >
-                    ▶
+                    <ChevronRight size={16} />
                   </button>
 
+                  {myMode === "presenting" && (
+                    <>
+                      <div className={styles.consoleDivider} />
+                      <button
+                        className={`${styles.consoleBtnLabeled} ${drawingEnabled ? styles.consoleBtnActive : ""}`}
+                        onClick={() => setActiveTool(activeTool === "pen" ? "none" : "pen")}
+                        title="Pen"
+                      >
+                        <Pen size={14} />
+                        Pen
+                      </button>
+                      <button
+                        className={`${styles.consoleBtnLabeled} ${laserEnabled ? styles.consoleBtnActive : ""}`}
+                        onClick={() => setActiveTool(activeTool === "laser" ? "none" : "laser")}
+                        title="Laser"
+                      >
+                        <Crosshair size={14} />
+                        Laser
+                      </button>
+                      <button
+                        className={styles.consoleBtnLabeled}
+                        onClick={clearAllDrawings}
+                        disabled={drawings.length === 0}
+                        title="Clear drawings"
+                      >
+                        <Eraser size={14} />
+                        Clear
+                      </button>
+                    </>
+                  )}
+
+                  <div className={styles.consoleDivider} />
+
+                  {/* Options menu */}
                   <div style={{ position: "relative" }}>
                     <button
-                      className={styles.toolbarBtn}
+                      className={styles.consoleBtn}
                       onClick={(e) => { e.stopPropagation(); setIsOptionsOpen(!isOptionsOpen); }}
                       title="Options"
                     >
-                      ⋮
+                      <MoreVertical size={16} />
                     </button>
-
                     {isOptionsOpen && (
                       <div className={styles.optionsMenu}>
                         {myMode === "presenting" && (
                           <>
                             <button onClick={(e) => { e.stopPropagation(); togglePointerVisibility(); setIsOptionsOpen(false); }}>
-                              {isPointerVisible ? "Hide pointer" : "Show pointer"}
+                              {isPointerVisible ? <><EyeOff size={13} /> Hide pointer</> : <><Eye size={13} /> Show pointer</>}
                             </button>
                             <button onClick={(e) => { e.stopPropagation(); setShowCustomCursor(!showCustomCursor); setIsOptionsOpen(false); }}>
-                              {showCustomCursor ? "Use default cursor" : "Use custom cursor"}
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); setActiveTool(activeTool === "pen" ? "none" : "pen"); setIsOptionsOpen(false); }}>
-                              {drawingEnabled ? "Turn off pen" : "Turn on pen"}
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); setActiveTool(activeTool === "laser" ? "none" : "laser"); setIsOptionsOpen(false); }}>
-                              {laserEnabled ? "Turn off laser" : "Turn on laser"}
-                            </button>
-                            <button disabled={drawings.length === 0} onClick={(e) => { e.stopPropagation(); clearAllDrawings(); setIsOptionsOpen(false); }}>
-                              Clear drawings
+                              <MousePointer2 size={13} /> {showCustomCursor ? "Default cursor" : "Custom cursor"}
                             </button>
                             <div className={styles.menuDivider} />
                           </>
                         )}
-                        <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}>
-                          Exit full screen
+                        <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); setIsOptionsOpen(false); }}>
+                          <Minimize2 size={13} /> Exit fullscreen
                         </button>
                       </div>
                     )}
                   </div>
+
+                  {/* Exit fullscreen */}
+                  <button
+                    className={styles.consoleBtn}
+                    onClick={toggleFullscreen}
+                    title="Exit fullscreen"
+                  >
+                    <Minimize2 size={16} />
+                  </button>
                 </div>
               </div>
-
-              {myMode === "presenting" && (
-                <div className={styles.floatingToolbarZoneRight}>
-                  <div className={styles.penToolbar}>
-                    <button
-                      className={`${styles.penToolBtn} ${drawingEnabled ? styles.penToolBtnActive : ""}`}
-                      onClick={() => setActiveTool(activeTool === "pen" ? "none" : "pen")}
-                    >
-                      ✏️ Pen
-                    </button>
-                    <button
-                      className={`${styles.penToolBtn} ${laserEnabled ? styles.penToolBtnActive : ""}`}
-                      onClick={() => setActiveTool(activeTool === "laser" ? "none" : "laser")}
-                    >
-                      🔴 Laser
-                    </button>
-                    <button
-                      className={styles.penToolBtn}
-                      onClick={clearAllDrawings}
-                      disabled={drawings.length === 0}
-                    >
-                      🗑️ Clear
-                    </button>
-                  </div>
-                </div>
-              )}
-              </>
             )}
           </div>
         </div>
@@ -1151,68 +1227,80 @@ export default function UnifiedRoom() {
         {/* Controls */}
         {myMode === "presenting" && (
           <div className={styles.controls}>
-            <button
-              className="btn btn-ghost"
-              onClick={() => goTo(currentSlide - 1)}
-              disabled={currentSlide === 0}
-            >
-              ← Prev
-            </button>
+            <div className={styles.console}>
+              <button
+                className={styles.consoleBtn}
+                onClick={() => goTo(currentSlide - 1)}
+                disabled={currentSlide === 0}
+                title="Previous slide"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span className={styles.consoleSlidNum}>
+                {currentSlide + 1} / {state.totalSlides}
+              </span>
+              <button
+                className={styles.consoleBtn}
+                onClick={() => goTo(currentSlide + 1)}
+                disabled={currentSlide === state.totalSlides - 1}
+                title="Next slide"
+              >
+                <ChevronRight size={16} />
+              </button>
 
-            <div className={styles.slideCounter}>
-              <span className={styles.slideNum}>{currentSlide + 1}</span>
-              <span className={styles.slideTotal}> / {state.totalSlides}</span>
+              <div className={styles.consoleDivider} />
+
+              <button
+                className={`${styles.consoleBtnLabeled} ${drawingEnabled ? styles.consoleBtnActive : ""}`}
+                onClick={() => setActiveTool(activeTool === "pen" ? "none" : "pen")}
+                title="Toggle pen"
+              >
+                <Pen size={14} />
+                Pen
+              </button>
+              <button
+                className={`${styles.consoleBtnLabeled} ${laserEnabled ? styles.consoleBtnActive : ""}`}
+                onClick={() => setActiveTool(activeTool === "laser" ? "none" : "laser")}
+                title="Toggle laser"
+              >
+                <Crosshair size={14} />
+                Laser
+              </button>
+              <button
+                className={`${styles.consoleBtnLabeled} ${showCustomCursor ? styles.consoleBtnActive : ""}`}
+                onClick={() => setShowCustomCursor(!showCustomCursor)}
+                title="Toggle custom cursor"
+              >
+                <MousePointer2 size={14} />
+                Cursor
+              </button>
+              <button
+                className={`${styles.consoleBtnLabeled} ${isPointerVisible ? styles.consoleBtnActive : ""}`}
+                onClick={togglePointerVisibility}
+                title="Toggle pointer visibility"
+              >
+                {isPointerVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+                Pointer
+              </button>
+
+              <div className={styles.consoleDivider} />
+
+              <button
+                className={styles.consoleBtn}
+                onClick={clearAllDrawings}
+                disabled={drawings.length === 0}
+                title="Clear drawings"
+              >
+                <Eraser size={16} />
+              </button>
+              <button
+                className={styles.consoleBtn}
+                onClick={toggleFullscreen}
+                title="Fullscreen"
+              >
+                <Maximize2 size={16} />
+              </button>
             </div>
-
-            <button
-              className="btn btn-ghost"
-              onClick={() => goTo(currentSlide + 1)}
-              disabled={currentSlide === state.totalSlides - 1}
-            >
-              Next →
-            </button>
-
-            <div style={{ width: "1px", height: "24px", background: "var(--border)", margin: "0 8px" }} />
-
-            <button
-              className={`btn ${drawingEnabled ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => setActiveTool(activeTool === "pen" ? "none" : "pen")}
-              title="Toggle drawing mode"
-            >
-              {drawingEnabled ? "✏️ Drawing" : "✏️ Pen"}
-            </button>
-
-            <button
-              className={`btn ${laserEnabled ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => setActiveTool(activeTool === "laser" ? "none" : "laser")}
-              title="Toggle laser pointer"
-            >
-              🔴 Laser
-            </button>
-
-            <button
-              className={`btn ${showCustomCursor ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => setShowCustomCursor(!showCustomCursor)}
-              title="Toggle custom cursor"
-            >
-              {showCustomCursor ? "🖱️ Custom" : "🖱️ Default"}
-            </button>
-
-            <button
-              className={`btn ${isPointerVisible ? "btn-primary" : "btn-ghost"}`}
-              onClick={togglePointerVisibility}
-              title="Toggle pointer broadcasting"
-            >
-              {isPointerVisible ? "👁️ Pointer On" : "👁️ Pointer Off"}
-            </button>
-
-            <button className="btn btn-ghost" onClick={clearAllDrawings} disabled={drawings.length === 0}>
-              🗑️ Clear
-            </button>
-
-            <button className="btn btn-ghost" onClick={toggleFullscreen}>
-              {isFullscreen ? "⛶ Exit" : "⛶ Fullscreen"}
-            </button>
           </div>
         )}
 
@@ -1222,20 +1310,26 @@ export default function UnifiedRoom() {
               <span className="live-dot" style={{ width: 5, height: 5 }} />
               Watching {presenters.length > 0 ? presenters[0].name : "presentation"}
             </div>
-            <button className="btn btn-ghost" onClick={toggleFullscreen}>
-              {isFullscreen ? "⛶ Exit Theater" : "⛶ Theater"}
-            </button>
-            <button className="btn btn-primary" onClick={triggerNativeFullscreen}>
-              🖥️ Takeover
-            </button>
+            <div className={styles.console}>
+              <button
+                className={styles.consoleBtn}
+                onClick={toggleFullscreen}
+                title={isFullscreen ? "Exit theater" : "Theater mode"}
+              >
+                {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              </button>
+              <button
+                className={styles.consoleBtnLabeled}
+                onClick={triggerNativeFullscreen}
+                title="Native fullscreen"
+                style={{ color: "var(--accent-light)" }}
+              >
+                <Monitor size={14} />
+                Takeover
+              </button>
+            </div>
           </div>
         )}
-
-        <p className={styles.keyHint}>
-          {myMode === "presenting"
-            ? "← → or Spacebar to navigate · F for fullscreen"
-            : "Press F for fullscreen"}
-        </p>
 
         {/* Toast Notification */}
         {toastMessage && (
