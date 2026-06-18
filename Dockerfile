@@ -19,13 +19,9 @@ RUN npm run build
 FROM node:20-bookworm AS runner
 WORKDIR /app
 
-# Install LibreOffice for PPTX → PNG conversion and poppler-utils for PDF → PNG
+# Install poppler-utils for PDF → PNG
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      libreoffice \
-      libreoffice-impress \
-      fonts-liberation \
-      fonts-dejavu \
       poppler-utils \
       && rm -rf /var/lib/apt/lists/*
 

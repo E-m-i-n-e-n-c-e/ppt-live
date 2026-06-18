@@ -22,8 +22,8 @@ export default function HomePage() {
   // ── Upload ─────────────────────────────────────────────────────────────────
 
   const handleFile = useCallback((f: File) => {
-    if (!f.name.match(/\.(pptx?|pdf)$/i)) {
-      setUploadError("Only .pptx and .pdf files are supported");
+    if (!f.name.match(/\.pdf$/i)) {
+      setUploadError("Only .pdf files are supported");
       return;
     }
     setFile(f);
@@ -53,11 +53,6 @@ export default function HomePage() {
 
       if (!res.ok) {
         setUploadError(data.error ?? "Upload failed");
-        if (data.libreofficeRequired) {
-          setUploadError(
-            "LibreOffice not found. Install it with: brew install --cask libreoffice"
-          );
-        }
         return;
       }
 
@@ -101,7 +96,7 @@ export default function HomePage() {
           <span className={styles.gradient}>live & in sync</span>
         </h1>
         <p className={styles.sub}>
-          Upload a PowerPoint or PDF, share a 6-character code. Everyone can view or present — 
+          Upload a PDF, share a 6-character code. Everyone can view or present — 
           switch modes anytime, no rigid roles.
         </p>
       </div>
@@ -116,7 +111,7 @@ export default function HomePage() {
             </div>
             <div>
               <h2 className={styles.cardTitle}>Start a Presentation</h2>
-              <p className={styles.cardSub}>Upload your .pptx or .pdf and get a live room code</p>
+              <p className={styles.cardSub}>Upload your .pdf and get a live room code</p>
             </div>
           </div>
 
@@ -134,7 +129,7 @@ export default function HomePage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pptx,.ppt,.pdf"
+              accept=".pdf"
               style={{ display: "none" }}
               onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
             />
@@ -147,7 +142,7 @@ export default function HomePage() {
             ) : (
               <>
                 <div className={styles.dropIcon}><CloudIcon /></div>
-                <p className={styles.dropText}>Drop your .pptx or .pdf here</p>
+                <p className={styles.dropText}>Drop your .pdf here</p>
                 <p className={styles.dropSub}>or click to browse</p>
               </>
             )}

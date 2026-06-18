@@ -9,25 +9,6 @@ import { createRoom } from "@/lib/room-store";
 const execAsync = promisify(exec);
 const nanoid = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 
-// Try LibreOffice in several known locations
-const LIBRE_OFFICE_PATHS = [
-  "libreoffice",
-  "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-  "/usr/bin/libreoffice",
-  "/usr/local/bin/libreoffice",
-];
-
-async function convertPptx(pptxPath: string, outDir: string): Promise<void> {
-  for (const bin of LIBRE_OFFICE_PATHS) {
-    try {
-      await execAsync(`"${bin}" --headless --convert-to png --outdir "${outDir}" "${pptxPath}"`);
-      return;
-    } catch {
-      // try next path
-    }
-  }
-  throw new Error("LibreOffice not found");
-}
 
 async function convertPdf(pdfPath: string, outDir: string): Promise<void> {
   // Use pdftoppm from poppler-utils (available in Docker)
@@ -54,11 +35,10 @@ export async function POST(req: NextRequest) {
     }
 
     const isPdf = file.name.match(/\.pdf$/i);
-    const isPptx = file.name.match(/\.pptx?$/i);
 
-    if (!isPdf && !isPptx) {
+    if (!isPdf) {
       return NextResponse.json(
-        { error: "Only .pptx and .pdf files are supported" },
+        { error: "Only .pdf files are supported" },
         { status: 400 }
       );
     }
@@ -70,26 +50,17 @@ export async function POST(req: NextRequest) {
 
     // Write uploaded file to disk (temporarily for conversion)
     const buffer = Buffer.from(await file.arrayBuffer());
-    const ext = isPdf ? "pdf" : "pptx";
+    const ext = "pdf";
     const filePath = path.join(tmpDir, `presentation.${ext}`);
     await writeFile(filePath, buffer);
 
     // Convert to PNGs based on file type
     try {
-      if (isPdf) {
-        await convertPdf(filePath, tmpDir);
-      } else {
-        await convertPptx(filePath, tmpDir);
-      }
+      await convertPdf(filePath, tmpDir);
     } catch (error) {
-      const errorMsg = isPdf
-        ? "PDF conversion failed. Please ensure the PDF is valid."
-        : "LibreOffice is required to convert slides. Install it with: brew install --cask libreoffice";
-      
       return NextResponse.json(
         {
-          error: errorMsg,
-          libreofficeRequired: !isPdf,
+          error: "PDF conversion failed. Please ensure the PDF is valid.",
         },
         { status: 500 }
       );
@@ -103,7 +74,7 @@ export async function POST(req: NextRequest) {
 
     if (pngs.length === 0) {
       return NextResponse.json(
-        { error: `Conversion produced no slides. Is the file a valid ${isPdf ? "PDF" : "PPTX"}?` },
+        { error: `Conversion produced no slides. Is the file a valid PDF?` },
         { status: 500 }
       );
     }
