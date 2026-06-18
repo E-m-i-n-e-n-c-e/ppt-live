@@ -71,6 +71,11 @@ export default function UnifiedRoom() {
 
   const slideContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Throttling refs (Cap at ~200 FPS -> 5ms)
+  const lastCursorMoveRef = useRef<number>(0);
+  const lastDrawEmitRef = useRef<number>(0);
+
   const [stageDimensions, setStageDimensions] = useState({ width: 0, height: 0 });
 
   // ── Calculate Strict 16:9 Dimensions ───────────────────────────────────────
@@ -99,8 +104,8 @@ export default function UnifiedRoom() {
 
     updateDimensions();
     // Re-calculate after a brief delay for fullscreen transitions
-    setTimeout(updateDimensions, 50); 
-    
+    setTimeout(updateDimensions, 50);
+
     window.addEventListener("resize", updateDimensions);
     return () => window.removeEventListener("resize", updateDimensions);
   }, [isFullscreen]);
@@ -404,6 +409,10 @@ export default function UnifiedRoom() {
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (myMode !== "presenting") return;
 
+    const now = Date.now();
+    if (now - lastCursorMoveRef.current < 5) return; // 5ms = 200 FPS cap
+    lastCursorMoveRef.current = now;
+
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
@@ -453,14 +462,21 @@ export default function UnifiedRoom() {
     const newPath = [...currentPath, { x, y }];
     setCurrentPath(newPath);
 
-    // Emit real-time drawing update with slide index and drawing ID
-    getSocket().emit("draw", { roomId, path: newPath, slideIndex: currentSlide, drawingId: currentDrawingId });
+    const now = Date.now();
+    if (now - lastDrawEmitRef.current >= 5) { // 5ms = 200 FPS cap
+      // Emit real-time drawing update with slide index and drawing ID
+      getSocket().emit("draw", { roomId, path: newPath, slideIndex: currentSlide, drawingId: currentDrawingId });
+      lastDrawEmitRef.current = now;
+    }
   };
 
   const handleDrawEnd = () => {
     if (!isDrawing || myMode !== "presenting") return;
     setIsDrawing(false);
     if (currentPath.length > 0 && currentDrawingId) {
+      // Ensure the finalized path is broadcasted (in case the last move was skipped by throttle)
+      getSocket().emit("draw", { roomId, path: currentPath, slideIndex: currentSlide, drawingId: currentDrawingId });
+      
       // Already emitted during drawing, just save to local state
       setDrawingsBySlide((prev) => ({
         ...prev,
@@ -735,8 +751,8 @@ export default function UnifiedRoom() {
           className={`${styles.slideWrap} ${isFullscreen ? styles.theaterMode : ""}`}
           style={{ cursor: myMode === "presenting" && showCustomCursor ? "none" : "default" }}
         >
-          <div 
-            className={styles.stageContent} 
+          <div
+            className={styles.stageContent}
             onMouseMove={handleMouseMove}
             style={{
               width: stageDimensions.width ? `${stageDimensions.width}px` : "100%",
