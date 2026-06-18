@@ -13,11 +13,12 @@ const nanoid = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 async function convertPdf(pdfPath: string, outDir: string): Promise<void> {
   // Use pdftoppm from poppler-utils (available in Docker)
   // -png: output format
-  // -r 150: resolution (DPI) for better quality
+  // -scale-to 2560: Normalizes output to 1440p (2K) resolution for extremely crisp text, regardless of PDF physical page size
+  // -aa yes -aaVector yes: Forces strict anti-aliasing for smooth fonts and vector shapes
   try {
     // pdftoppm outputs files as prefix-pagenum.png (e.g., page-1.png, page-2.png)
     await execAsync(
-      `pdftoppm -png -r 150 "${pdfPath}" "${path.join(outDir, "page")}"`
+      `pdftoppm -png -scale-to 2560 -aa yes -aaVector yes "${pdfPath}" "${path.join(outDir, "page")}"`
     );
   } catch (error: any) {
     console.error("[convertPdf] Error:", error.message);
