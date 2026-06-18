@@ -160,11 +160,11 @@ nextApp.prepare().then(() => {
       socket.to(roomId).emit("cursor-hide", { participantId: socket.id });
     });
 
-    socket.on("laser", ({ roomId, x, y }: { roomId: string; x: number; y: number }) => {
+    socket.on("laser", ({ roomId, strokeId, path }: { roomId: string; strokeId: string; path: { x: number; y: number }[] }) => {
       const participants = getParticipants(roomId);
       const participant = participants.find(p => p.id === socket.id);
       if (!participant || participant.mode !== "presenting") return;
-      socket.to(roomId).emit("laser-update", { participantId: socket.id, name: participant.name, x, y });
+      socket.to(roomId).emit("laser-update", { participantId: socket.id, strokeId, path });
     });
 
     socket.on(

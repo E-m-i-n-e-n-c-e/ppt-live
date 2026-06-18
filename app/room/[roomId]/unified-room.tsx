@@ -6,6 +6,29 @@ import { getSocket, disconnectSocket } from "@/lib/socket";
 import styles from "./room.module.css";
 import { getStroke } from "perfect-freehand";
 
+const LASER_STROKE_OPTIONS = {
+  size: 6,
+  thinning: 0,
+  smoothing: 0.5,
+  streamline: 0.5,
+  simulatePressure: false,
+};
+
+function getLaserStrokePath(points: { x: number; y: number }[]): Path2D {
+  const outline = getStroke(points.map((p) => [p.x, p.y]), LASER_STROKE_OPTIONS);
+  if (!outline.length) return new Path2D();
+  const d = outline.reduce<(string | number)[]>(
+    (acc, [x0, y0], i, arr) => {
+      const [x1, y1] = arr[(i + 1) % arr.length];
+      acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+      return acc;
+    },
+    ["M", ...outline[0], "Q"]
+  );
+  d.push("Z");
+  return new Path2D(d.join(" "));
+}
+
 const STROKE_OPTIONS = {
   size: 10,
   thinning: 0.6,
@@ -106,7 +129,8 @@ export default function UnifiedRoom() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const laserCanvasRef = useRef<HTMLCanvasElement>(null);
   const lastLaserEmitRef = useRef<number>(0);
-  const laserTrailsRef = useRef<Map<string, { x: number; y: number; t: number }[]>>(new Map());
+  const laserStrokesRef = useRef<Map<string, { strokes: Map<string, { x: number; y: number }[]>; lastActivity: number }>>(new Map());
+  const currentLaserStrokeRef = useRef<string | null>(null);
 
   // Throttling refs (Cap at ~200 FPS -> 5ms)
   const lastCursorMoveRef = useRef<number>(0);
@@ -252,10 +276,11 @@ export default function UnifiedRoom() {
       }));
     });
 
-    socket.on("laser-update", ({ participantId, x, y }: { participantId: string; x: number; y: number }) => {
-      const trail = laserTrailsRef.current.get(participantId) ?? [];
-      trail.push({ x, y, t: Date.now() });
-      laserTrailsRef.current.set(participantId, trail);
+    socket.on("laser-update", ({ participantId, strokeId, path }: { participantId: string; strokeId: string; path: { x: number; y: number }[] }) => {
+      const entry = laserStrokesRef.current.get(participantId) ?? { strokes: new Map(), lastActivity: 0 };
+      entry.strokes.set(strokeId, path);
+      entry.lastActivity = Date.now();
+      laserStrokesRef.current.set(participantId, entry);
     });
 
     socket.on("session-ended", () => setEnded(true));
@@ -377,8 +402,26 @@ export default function UnifiedRoom() {
 
   // ── Laser rAF loop ───────────────────────────────────────────────────────────
   useEffect(() => {
-    const FADE_MS = 800;
+    const HOLD_MS = 2000;
+    const FADE_MS = 1500;
     let rafId: number;
+
+    const drawStroke = (ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) => {
+      if (pts.length === 1) {
+        ctx.shadowColor = "#FF3B30";
+        ctx.shadowBlur = 16;
+        ctx.fillStyle = "#FF6B6B";
+        ctx.beginPath();
+        ctx.arc(pts[0].x, pts[0].y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        return;
+      }
+      const path = getLaserStrokePath(pts);
+      ctx.shadowColor = "#FF3B30";
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = "#FF6B6B";
+      ctx.fill(path);
+    };
 
     const frame = () => {
       const canvas = laserCanvasRef.current;
@@ -387,46 +430,15 @@ export default function UnifiedRoom() {
         if (ctx) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           const now = Date.now();
-          laserTrailsRef.current.forEach((trail, id) => {
-            const fresh = trail.filter(p => now - p.t < FADE_MS);
-            if (fresh.length === 0) { laserTrailsRef.current.delete(id); return; }
-            laserTrailsRef.current.set(id, fresh);
-            if (fresh.length < 2) return;
-
-            const newestAge = (now - fresh[fresh.length - 1].t) / FADE_MS;
-            const alpha = 1 - newestAge * 0.6;
-
+          laserStrokesRef.current.forEach((entry, participantId) => {
+            const age = now - entry.lastActivity;
+            const alpha = age < HOLD_MS ? 1
+              : age < HOLD_MS + FADE_MS ? 1 - (age - HOLD_MS) / FADE_MS
+              : 0;
+            if (alpha <= 0) { laserStrokesRef.current.delete(participantId); return; }
             ctx.save();
             ctx.globalAlpha = alpha;
-            ctx.lineCap = "round";
-            ctx.lineJoin = "round";
-
-            // Soft outer glow
-            ctx.shadowColor = "#FF3B30";
-            ctx.shadowBlur = 20;
-            ctx.strokeStyle = "rgba(255,59,48,0.4)";
-            ctx.lineWidth = 10;
-            ctx.beginPath();
-            fresh.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-            ctx.stroke();
-
-            // Bright core
-            ctx.shadowBlur = 8;
-            ctx.strokeStyle = "#FF6B6B";
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            fresh.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-            ctx.stroke();
-
-            // White head dot
-            const head = fresh[fresh.length - 1];
-            ctx.shadowBlur = 30;
-            ctx.shadowColor = "#FF3B30";
-            ctx.fillStyle = "#FFFFFF";
-            ctx.beginPath();
-            ctx.arc(head.x, head.y, 4, 0, Math.PI * 2);
-            ctx.fill();
-
+            entry.strokes.forEach(pts => drawStroke(ctx, pts));
             ctx.restore();
           });
         }
@@ -510,7 +522,20 @@ export default function UnifiedRoom() {
   const handleDrawStart = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (myMode !== "presenting" || (!drawingEnabled && !laserEnabled)) return;
     setIsDrawing(true);
-    if (laserEnabled) return; // laser only needs isDrawing flag
+    if (laserEnabled) {
+      const strokeId = `${Date.now()}-${Math.random()}`;
+      currentLaserStrokeRef.current = strokeId;
+      const canvas = e.currentTarget;
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+      const entry = laserStrokesRef.current.get("me") ?? { strokes: new Map(), lastActivity: 0 };
+      entry.strokes.set(strokeId, [{ x, y }]);
+      entry.lastActivity = Date.now();
+      laserStrokesRef.current.set("me", entry);
+      getSocket().emit("laser", { roomId, strokeId, path: [{ x, y }] });
+      return;
+    }
 
     // Generate unique ID for this drawing session
     const drawingId = `${Date.now()}-${Math.random()}`;
@@ -538,13 +563,16 @@ export default function UnifiedRoom() {
 
     // ── Laser branch (mouse held) ────────────────────────────────────────────
     if (laserEnabled) {
-      if (!isDrawing) return;
-      const trail = laserTrailsRef.current.get("me") ?? [];
-      trail.push({ x, y, t: Date.now() });
-      laserTrailsRef.current.set("me", trail);
+      if (!isDrawing || !currentLaserStrokeRef.current) return;
+      const entry = laserStrokesRef.current.get("me");
+      if (!entry) return;
+      const pts = entry.strokes.get(currentLaserStrokeRef.current) ?? [];
+      pts.push({ x, y });
+      entry.strokes.set(currentLaserStrokeRef.current, pts);
+      entry.lastActivity = Date.now();
       const now = Date.now();
       if (now - lastLaserEmitRef.current >= 5) {
-        getSocket().emit("laser", { roomId, x, y });
+        getSocket().emit("laser", { roomId, strokeId: currentLaserStrokeRef.current, path: pts });
         lastLaserEmitRef.current = now;
       }
       return;
@@ -566,6 +594,7 @@ export default function UnifiedRoom() {
   const handleDrawEnd = () => {
     if (!isDrawing || myMode !== "presenting") return;
     setIsDrawing(false);
+    currentLaserStrokeRef.current = null;
     if (currentPath.length > 0 && currentDrawingId) {
       // Ensure the finalized path is broadcasted (in case the last move was skipped by throttle)
       getSocket().emit("draw", { roomId, path: currentPath, slideIndex: currentSlide, drawingId: currentDrawingId });
