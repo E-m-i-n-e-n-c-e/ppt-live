@@ -2,15 +2,18 @@ import { createServer } from "http";
 import { Server, Socket } from "socket.io";
 import next from "next";
 import express, { Request, Response } from "express";
-import { 
-  roomExists, 
-  getRoomMeta, 
+import {
+  roomExists,
+  getRoomMeta,
   updateCurrentSlide,
   addParticipant,
   removeParticipant,
   getParticipants,
   updateParticipant,
-  type Participant 
+  upsertDrawing,
+  clearSlideDrawings,
+  getAllDrawings,
+  type Participant
 } from "./lib/room-store";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -69,13 +72,16 @@ nextApp.prepare().then(() => {
         const participants = getParticipants(roomId);
         io.to(roomId).emit("participant-joined", { participant });
 
+        const drawings = await getAllDrawings(roomId);
+
         // Send current state to the new participant
         socket.emit("room-state", {
           currentSlide: roomMeta.currentSlide,
           totalSlides: roomMeta.totalSlides,
-          slides: roomMeta.totalSlides, // Just send count
+          slides: roomMeta.totalSlides,
           participants,
-          activePresenter: null, // TODO: track active presenter
+          activePresenter: null,
+          drawings,
         });
       }
     );
@@ -154,6 +160,13 @@ nextApp.prepare().then(() => {
       socket.to(roomId).emit("cursor-hide", { participantId: socket.id });
     });
 
+    socket.on("laser", ({ roomId, x, y }: { roomId: string; x: number; y: number }) => {
+      const participants = getParticipants(roomId);
+      const participant = participants.find(p => p.id === socket.id);
+      if (!participant || participant.mode !== "presenting") return;
+      socket.to(roomId).emit("laser-update", { participantId: socket.id, name: participant.name, x, y });
+    });
+
     socket.on(
       "draw",
       ({
@@ -171,7 +184,7 @@ nextApp.prepare().then(() => {
         const participant = participants.find(p => p.id === socket.id);
         if (!participant || participant.mode !== "presenting") return;
 
-        // Broadcast drawing to all participants with slide index and drawing ID
+        // Broadcast instantly — don't await Redis
         io.to(roomId).emit("draw-update", {
           participantId: socket.id,
           name: participant.name,
@@ -179,6 +192,14 @@ nextApp.prepare().then(() => {
           slideIndex,
           drawingId,
         });
+
+        // Persist in background for late joiners
+        upsertDrawing(roomId, slideIndex, {
+          participantId: socket.id,
+          name: participant.name,
+          path,
+          drawingId,
+        }).catch(err => console.error("[redis] upsertDrawing error:", err));
       }
     );
 
@@ -188,6 +209,7 @@ nextApp.prepare().then(() => {
       if (!participant || participant.mode !== "presenting") return;
 
       io.to(roomId).emit("clear-drawings", { slideIndex });
+      clearSlideDrawings(roomId, slideIndex).catch(err => console.error("[redis] clearSlideDrawings error:", err));
       console.log(`[WS] Drawings cleared on slide ${slideIndex} by ${participant.name}`);
     });
 

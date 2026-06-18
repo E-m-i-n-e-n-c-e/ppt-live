@@ -141,6 +141,42 @@ export async function deleteRoom(roomId: string): Promise<void> {
   console.log(`[redis] Deleted room ${roomId}`);
 }
 
+// ─── Drawing Storage ──────────────────────────────────────────────────────────
+
+export interface StoredDrawPath {
+  participantId: string;
+  name: string;
+  path: { x: number; y: number }[];
+  drawingId?: string;
+}
+
+export async function upsertDrawing(roomId: string, slideIndex: number, drawing: StoredDrawPath): Promise<void> {
+  const redis = getRedis();
+  const key = `room:${roomId}:drawings`;
+  const field = String(slideIndex);
+  const existing = await redis.hget(key, field);
+  const drawings: StoredDrawPath[] = existing ? JSON.parse(existing) : [];
+  const idx = drawings.findIndex(d => d.drawingId && d.drawingId === drawing.drawingId);
+  if (idx >= 0) drawings[idx] = drawing;
+  else drawings.push(drawing);
+  await redis.hset(key, field, JSON.stringify(drawings));
+  await redis.expire(key, 3600 * 24);
+}
+
+export async function clearSlideDrawings(roomId: string, slideIndex: number): Promise<void> {
+  const redis = getRedis();
+  await redis.hdel(`room:${roomId}:drawings`, String(slideIndex));
+}
+
+export async function getAllDrawings(roomId: string): Promise<Record<number, StoredDrawPath[]>> {
+  const redis = getRedis();
+  const raw = await redis.hgetall(`room:${roomId}:drawings`);
+  if (!raw) return {};
+  return Object.fromEntries(
+    Object.entries(raw).map(([slide, json]) => [Number(slide), JSON.parse(json)])
+  );
+}
+
 // In-memory participant tracking (WebSocket connections are process-local)
 const participantsByRoom = new Map<string, Map<string, Participant>>();
 

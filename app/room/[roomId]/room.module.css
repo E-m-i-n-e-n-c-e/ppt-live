@@ -275,9 +275,9 @@
   animation: slideNextAnim 1s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* .slidePrev {
+.slidePrev {
   animation: slidePrevAnim 1s cubic-bezier(0.16, 1, 0.3, 1);
-} */
+}
 
 @keyframes slideNextAnim {
   from {
@@ -291,7 +291,7 @@
   }
 }
 
-/* @keyframes slidePrevAnim {
+@keyframes slidePrevAnim {
   from {
     opacity: 0;
     transform: translateX(-40px);
@@ -301,7 +301,7 @@
     opacity: 1;
     transform: translateX(0);
   }
-} */
+}
 
 /* Controls */
 .controls {
@@ -464,8 +464,28 @@
   padding-bottom: 24px;
   padding-left: 24px;
   z-index: 10000;
-  /* Make the hit area slightly larger than the toolbar */
   cursor: default;
+}
+
+.floatingToolbarZoneRight {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  padding: 40px;
+  padding-bottom: 24px;
+  padding-right: 24px;
+  z-index: 10000;
+  cursor: default;
+}
+
+.toolbarBtnActive {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.floatingToolbarZoneRight .floatingToolbar {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .floatingToolbar {
