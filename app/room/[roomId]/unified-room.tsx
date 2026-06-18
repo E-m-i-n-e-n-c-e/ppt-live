@@ -108,7 +108,9 @@ export default function UnifiedRoom() {
   const [slideDirection, setSlideDirection] = useState<"next" | "prev">("next");
   const [myMode, setMyMode] = useState<"presenting" | "viewing">(initialMode);
   const [copiedType, setCopiedType] = useState<null | "code" | "link">(null);
-  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(
+    () => typeof window !== "undefined" && window.innerWidth <= 700
+  );
   const [connected, setConnected] = useState(false);
   const [ended, setEnded] = useState(false);
   const [cursors, setCursors] = useState<CursorPosition[]>([]);
@@ -1010,6 +1012,13 @@ export default function UnifiedRoom() {
           >
             <PanelLeftOpen size={16} />
           </button>
+        )}
+        {!sidebarHidden && (
+          <div
+            className={styles.sidebarBackdrop}
+            onClick={() => setSidebarHidden(true)}
+            aria-hidden="true"
+          />
         )}
         <div
           ref={slideContainerRef}

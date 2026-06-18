@@ -673,3 +673,156 @@
   background: var(--border);
   margin: 4px 0;
 }
+
+/* ── Sidebar backdrop (desktop: off) ────────────────────────────────────────── */
+.sidebarBackdrop { display: none; }
+
+/* ── Portrait / narrow ──────────────────────────────────────────────────────── */
+@media (max-width: 700px) {
+  /* sidebar → off-canvas drawer */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    width: 280px;
+    max-width: 85vw;
+    z-index: 9000;
+    transform: translateX(0);
+    transition: transform 0.3s ease;
+    border-right: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+  }
+  .sidebarCollapsed {
+    width: 280px;
+    transform: translateX(-100%);
+    border-right: 1px solid var(--border);
+    box-shadow: none;
+  }
+  .sidebarInner {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* backdrop */
+  .sidebarBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 8999;
+    background: rgba(0, 0, 0, 0.5);
+    animation: fadeUp 0.2s ease;
+  }
+
+  /* stage / slide */
+  .stage {
+    padding: 12px;
+    gap: 12px;
+    justify-content: center;
+  }
+  .slideWrap,
+  .slideWrapWide {
+    max-width: 100%;
+  }
+  .floatingReveal {
+    top: calc(12px + env(safe-area-inset-top));
+    left: calc(12px + env(safe-area-inset-left));
+  }
+  .toast {
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  /* toolbars: labeled buttons → icon-only */
+  .consoleBtnLabeled {
+    width: 36px;
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+    justify-content: center;
+  }
+  .console {
+    gap: 1px;
+    padding: 4px;
+  }
+  .consoleSlidNum {
+    min-width: 36px;
+    padding: 0 2px;
+    font-size: 12px;
+  }
+  .consoleDivider {
+    margin: 0 2px;
+  }
+  /* safety net for very narrow (~320px) devices */
+  .controls .console,
+  .viewerControls .console {
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 100%;
+  }
+}
+
+/* ── Landscape / short height ───────────────────────────────────────────────── */
+@media (max-height: 500px) and (orientation: landscape) {
+  /* off-canvas drawer (repeated so landscape-only phones are also covered) */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    width: 280px;
+    max-width: 60vw;
+    z-index: 9000;
+    transform: translateX(0);
+    transition: transform 0.3s ease;
+    box-shadow: var(--shadow-lg);
+  }
+  .sidebarCollapsed {
+    width: 280px;
+    transform: translateX(-100%);
+    box-shadow: none;
+  }
+  .sidebarInner {
+    width: 100%;
+    min-width: 0;
+  }
+  .sidebarBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 8999;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  /* slide fills available height */
+  .stage {
+    padding: 6px;
+    gap: 6px;
+  }
+  .slideWrap,
+  .slideWrapWide {
+    width: auto;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+  }
+
+  /* one-row compact toolbar — no wrap (vertical space scarce) */
+  .consoleBtnLabeled {
+    width: 34px;
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+    justify-content: center;
+  }
+  .consoleBtn {
+    width: 34px;
+    height: 34px;
+  }
+  .console {
+    gap: 1px;
+    padding: 3px 4px;
+  }
+  .consoleZone {
+    bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+}
