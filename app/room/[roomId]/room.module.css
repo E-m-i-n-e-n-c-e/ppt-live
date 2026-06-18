@@ -275,9 +275,9 @@
   animation: slideNextAnim 1s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* .slidePrev {
+.slidePrev {
   animation: slidePrevAnim 1s cubic-bezier(0.16, 1, 0.3, 1);
-} */
+}
 
 @keyframes slideNextAnim {
   from {
@@ -291,7 +291,7 @@
   }
 }
 
-/* @keyframes slidePrevAnim {
+@keyframes slidePrevAnim {
   from {
     opacity: 0;
     transform: translateX(-40px);
@@ -301,7 +301,7 @@
     opacity: 1;
     transform: translateX(0);
   }
-} */
+}
 
 /* Controls */
 .controls {
@@ -464,8 +464,76 @@
   padding-bottom: 24px;
   padding-left: 24px;
   z-index: 10000;
-  /* Make the hit area slightly larger than the toolbar */
   cursor: default;
+}
+
+.floatingToolbarZoneRight {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  padding: 40px;
+  padding-bottom: 24px;
+  padding-right: 24px;
+  z-index: 10000;
+  cursor: default;
+}
+
+.toolbarBtnActive {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.floatingToolbarZoneRight .floatingToolbar {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Bottom-right presenter pen overlay ──────────────────────────────────── */
+
+.penToolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.penToolBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: 100px;
+  background: rgba(15, 15, 15, 0.75);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.penToolBtn:hover:not(:disabled) {
+  background: rgba(30, 30, 30, 0.92);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.penToolBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.penToolBtnActive {
+  background: rgba(10, 10, 10, 0.95);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fff;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .floatingToolbar {

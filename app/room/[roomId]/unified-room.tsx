@@ -4,6 +4,54 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { getSocket, disconnectSocket } from "@/lib/socket";
 import styles from "./room.module.css";
+import { getStroke } from "perfect-freehand";
+
+const LASER_STROKE_OPTIONS = {
+  size: 6,
+  thinning: 0,
+  smoothing: 0.5,
+  streamline: 0.5,
+  simulatePressure: false,
+};
+
+function getLaserStrokePath(points: { x: number; y: number }[]): Path2D {
+  const outline = getStroke(points.map((p) => [p.x, p.y]), LASER_STROKE_OPTIONS);
+  if (!outline.length) return new Path2D();
+  const d = outline.reduce<(string | number)[]>(
+    (acc, [x0, y0], i, arr) => {
+      const [x1, y1] = arr[(i + 1) % arr.length];
+      acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+      return acc;
+    },
+    ["M", ...outline[0], "Q"]
+  );
+  d.push("Z");
+  return new Path2D(d.join(" "));
+}
+
+const STROKE_OPTIONS = {
+  size: 10,
+  thinning: 0.6,
+  smoothing: 0.5,
+  streamline: 0.5,
+  simulatePressure: true,
+};
+
+function getStrokePath(points: { x: number; y: number }[]): Path2D {
+  const outline = getStroke(points.map((p) => [p.x, p.y]), STROKE_OPTIONS);
+  if (!outline.length) return new Path2D();
+  // Quadratic bezier reducer from perfect-freehand docs — smoother than lineTo
+  const d = outline.reduce<(string | number)[]>(
+    (acc, [x0, y0], i, arr) => {
+      const [x1, y1] = arr[(i + 1) % arr.length];
+      acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+      return acc;
+    },
+    ["M", ...outline[0], "Q"]
+  );
+  d.push("Z");
+  return new Path2D(d.join(" "));
+}
 
 interface Participant {
   id: string;
@@ -16,9 +64,10 @@ interface Participant {
 interface RoomState {
   currentSlide: number;
   totalSlides: number;
-  slides: number; // Just the count now
+  slides: number;
   participants: Participant[];
   activePresenter: string | null;
+  drawings?: Record<number, { participantId: string; name: string; path: { x: number; y: number }[]; drawingId?: string }[]>;
 }
 
 interface CursorPosition {
@@ -58,7 +107,9 @@ export default function UnifiedRoom() {
   const [cursors, setCursors] = useState<CursorPosition[]>([]);
   const [drawingsBySlide, setDrawingsBySlide] = useState<Record<number, DrawPath[]>>({});
   const [isDrawing, setIsDrawing] = useState(false);
-  const [drawingEnabled, setDrawingEnabled] = useState(false);
+  const [activeTool, setActiveTool] = useState<"none" | "pen" | "laser">("none");
+  const drawingEnabled = activeTool === "pen";
+  const laserEnabled = activeTool === "laser";
   const [currentPath, setCurrentPath] = useState<{ x: number; y: number }[]>([]);
   const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -76,6 +127,10 @@ export default function UnifiedRoom() {
 
   const slideContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const laserCanvasRef = useRef<HTMLCanvasElement>(null);
+  const lastLaserEmitRef = useRef<number>(0);
+  const laserStrokesRef = useRef<Map<string, { strokes: Map<string, { x: number; y: number }[]>; lastActivity: number }>>(new Map());
+  const currentLaserStrokeRef = useRef<string | null>(null);
 
   // Throttling refs (Cap at ~200 FPS -> 5ms)
   const lastCursorMoveRef = useRef<number>(0);
@@ -136,6 +191,7 @@ export default function UnifiedRoom() {
         else if (data.currentSlide < prev) setSlideDirection("prev");
         return data.currentSlide;
       });
+      if (data.drawings) setDrawingsBySlide(data.drawings);
     });
 
     socket.on("participant-joined", ({ participant }: { participant: Participant }) => {
@@ -220,6 +276,13 @@ export default function UnifiedRoom() {
       }));
     });
 
+    socket.on("laser-update", ({ participantId, strokeId, path }: { participantId: string; strokeId: string; path: { x: number; y: number }[] }) => {
+      const entry = laserStrokesRef.current.get(participantId) ?? { strokes: new Map(), lastActivity: 0 };
+      entry.strokes.set(strokeId, path);
+      entry.lastActivity = Date.now();
+      laserStrokesRef.current.set(participantId, entry);
+    });
+
     socket.on("session-ended", () => setEnded(true));
 
     socket.on("error", ({ message }: { message: string }) => {
@@ -242,6 +305,7 @@ export default function UnifiedRoom() {
       socket.off("cursor-hide");
       socket.off("draw-update");
       socket.off("clear-drawings");
+      socket.off("laser-update");
       socket.off("session-ended");
       socket.off("error");
     };
@@ -324,45 +388,67 @@ export default function UnifiedRoom() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#FF6B6B";
 
-    // Draw all completed paths
     drawings.forEach((drawing) => {
-      ctx.strokeStyle = "#FF0000";
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      ctx.beginPath();
-      drawing.path.forEach((point, i) => {
-        if (i === 0) {
-          ctx.moveTo(point.x, point.y);
-        } else {
-          ctx.lineTo(point.x, point.y);
-        }
-      });
-      ctx.stroke();
+      ctx.fill(getStrokePath(drawing.path));
     });
 
-    // Draw current path being drawn
     if (currentPath.length > 0 && isDrawing) {
-      ctx.strokeStyle = "#FF0000";
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      ctx.beginPath();
-      currentPath.forEach((point, i) => {
-        if (i === 0) {
-          ctx.moveTo(point.x, point.y);
-        } else {
-          ctx.lineTo(point.x, point.y);
-        }
-      });
-      ctx.stroke();
+      ctx.fill(getStrokePath(currentPath));
     }
   }, [drawings, currentPath, isDrawing]);
+
+  // ── Laser rAF loop ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    const HOLD_MS = 600;
+    const FADE_MS = 500;
+    let rafId: number;
+
+    const drawStroke = (ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) => {
+      if (pts.length === 1) {
+        ctx.shadowColor = "#FF3B30";
+        ctx.shadowBlur = 16;
+        ctx.fillStyle = "#FF6B6B";
+        ctx.beginPath();
+        ctx.arc(pts[0].x, pts[0].y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        return;
+      }
+      const path = getLaserStrokePath(pts);
+      ctx.shadowColor = "#FF3B30";
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = "#FF6B6B";
+      ctx.fill(path);
+    };
+
+    const frame = () => {
+      const canvas = laserCanvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          const now = Date.now();
+          laserStrokesRef.current.forEach((entry, participantId) => {
+            const age = now - entry.lastActivity;
+            const alpha = age < HOLD_MS ? 1
+              : age < HOLD_MS + FADE_MS ? 1 - (age - HOLD_MS) / FADE_MS
+              : 0;
+            if (alpha <= 0) { laserStrokesRef.current.delete(participantId); return; }
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            entry.strokes.forEach(pts => drawStroke(ctx, pts));
+            ctx.restore();
+          });
+        }
+      }
+      rafId = requestAnimationFrame(frame);
+    };
+
+    rafId = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
 
   const goTo = useCallback(
     (idx: number) => {
@@ -434,8 +520,22 @@ export default function UnifiedRoom() {
   };
 
   const handleDrawStart = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (myMode !== "presenting" || !drawingEnabled) return;
+    if (myMode !== "presenting" || (!drawingEnabled && !laserEnabled)) return;
     setIsDrawing(true);
+    if (laserEnabled) {
+      const strokeId = `${Date.now()}-${Math.random()}`;
+      currentLaserStrokeRef.current = strokeId;
+      const canvas = e.currentTarget;
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+      const entry = laserStrokesRef.current.get("me") ?? { strokes: new Map(), lastActivity: 0 };
+      entry.strokes.set(strokeId, [{ x, y }]);
+      entry.lastActivity = Date.now();
+      laserStrokesRef.current.set("me", entry);
+      getSocket().emit("laser", { roomId, strokeId, path: [{ x, y }] });
+      return;
+    }
 
     // Generate unique ID for this drawing session
     const drawingId = `${Date.now()}-${Math.random()}`;
@@ -443,11 +543,8 @@ export default function UnifiedRoom() {
 
     const canvas = e.currentTarget;
     const rect = canvas.getBoundingClientRect();
-
-    // Calculate position relative to the actual displayed image size
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
 
@@ -455,24 +552,40 @@ export default function UnifiedRoom() {
   };
 
   const handleDrawMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || myMode !== "presenting" || !currentDrawingId) return;
+    if (myMode !== "presenting") return;
 
     const canvas = e.currentTarget;
     const rect = canvas.getBoundingClientRect();
-
-    // Calculate position relative to the actual displayed image size
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
+
+    // ── Laser branch (mouse held) ────────────────────────────────────────────
+    if (laserEnabled) {
+      if (!isDrawing || !currentLaserStrokeRef.current) return;
+      const entry = laserStrokesRef.current.get("me");
+      if (!entry) return;
+      const pts = entry.strokes.get(currentLaserStrokeRef.current) ?? [];
+      pts.push({ x, y });
+      entry.strokes.set(currentLaserStrokeRef.current, pts);
+      entry.lastActivity = Date.now();
+      const now = Date.now();
+      if (now - lastLaserEmitRef.current >= 5) {
+        getSocket().emit("laser", { roomId, strokeId: currentLaserStrokeRef.current, path: pts });
+        lastLaserEmitRef.current = now;
+      }
+      return;
+    }
+
+    // ── Pen branch ──────────────────────────────────────────────────────────
+    if (!isDrawing || !currentDrawingId) return;
 
     const newPath = [...currentPath, { x, y }];
     setCurrentPath(newPath);
 
     const now = Date.now();
-    if (now - lastDrawEmitRef.current >= 5) { // 5ms = 200 FPS cap
-      // Emit real-time drawing update with slide index and drawing ID
+    if (now - lastDrawEmitRef.current >= 5) {
       getSocket().emit("draw", { roomId, path: newPath, slideIndex: currentSlide, drawingId: currentDrawingId });
       lastDrawEmitRef.current = now;
     }
@@ -481,6 +594,7 @@ export default function UnifiedRoom() {
   const handleDrawEnd = () => {
     if (!isDrawing || myMode !== "presenting") return;
     setIsDrawing(false);
+    currentLaserStrokeRef.current = null;
     if (currentPath.length > 0 && currentDrawingId) {
       // Ensure the finalized path is broadcasted (in case the last move was skipped by throttle)
       getSocket().emit("draw", { roomId, path: currentPath, slideIndex: currentSlide, drawingId: currentDrawingId });
@@ -860,8 +974,9 @@ export default function UnifiedRoom() {
 
             {/* Drawing Canvas */}
             <canvas
+              key={currentSlide}
               ref={canvasRef}
-              className={styles.drawingCanvas}
+              className={`${styles.drawingCanvas} ${slideDirection === "next" ? styles.slideNext : styles.slidePrev}`}
               width={1920}
               height={1080}
               onMouseDown={handleDrawStart}
@@ -874,8 +989,23 @@ export default function UnifiedRoom() {
                 left: 0,
                 width: "100%",
                 height: "100%",
-                cursor: drawingEnabled && myMode === "presenting" ? "crosshair" : "default",
-                pointerEvents: drawingEnabled && myMode === "presenting" ? "auto" : "none",
+                cursor: (drawingEnabled || laserEnabled) && myMode === "presenting" ? "crosshair" : "default",
+                pointerEvents: (drawingEnabled || laserEnabled) && myMode === "presenting" ? "auto" : "none",
+              }}
+            />
+
+            {/* Laser canvas — sits on top, never persisted */}
+            <canvas
+              ref={laserCanvasRef}
+              width={1920}
+              height={1080}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                pointerEvents: "none",
               }}
             />
 
@@ -925,6 +1055,7 @@ export default function UnifiedRoom() {
 
             {/* Google Slides style floating toolbar - ONLY in fullscreen */}
             {isFullscreen && (
+              <>
               <div className={styles.floatingToolbarZone}>
                 <div className={styles.floatingToolbar}>
                   <button
@@ -966,14 +1097,15 @@ export default function UnifiedRoom() {
                             <button onClick={(e) => { e.stopPropagation(); setShowCustomCursor(!showCustomCursor); setIsOptionsOpen(false); }}>
                               {showCustomCursor ? "Use default cursor" : "Use custom cursor"}
                             </button>
-                            <button onClick={(e) => { e.stopPropagation(); setDrawingEnabled(!drawingEnabled); setIsOptionsOpen(false); }}>
+                            <button onClick={(e) => { e.stopPropagation(); setActiveTool(activeTool === "pen" ? "none" : "pen"); setIsOptionsOpen(false); }}>
                               {drawingEnabled ? "Turn off pen" : "Turn on pen"}
                             </button>
-                            {drawings.length > 0 && (
-                              <button onClick={(e) => { e.stopPropagation(); clearAllDrawings(); setIsOptionsOpen(false); }}>
-                                Clear drawings
-                              </button>
-                            )}
+                            <button onClick={(e) => { e.stopPropagation(); setActiveTool(activeTool === "laser" ? "none" : "laser"); setIsOptionsOpen(false); }}>
+                              {laserEnabled ? "Turn off laser" : "Turn on laser"}
+                            </button>
+                            <button disabled={drawings.length === 0} onClick={(e) => { e.stopPropagation(); clearAllDrawings(); setIsOptionsOpen(false); }}>
+                              Clear drawings
+                            </button>
                             <div className={styles.menuDivider} />
                           </>
                         )}
@@ -985,6 +1117,33 @@ export default function UnifiedRoom() {
                   </div>
                 </div>
               </div>
+
+              {myMode === "presenting" && (
+                <div className={styles.floatingToolbarZoneRight}>
+                  <div className={styles.penToolbar}>
+                    <button
+                      className={`${styles.penToolBtn} ${drawingEnabled ? styles.penToolBtnActive : ""}`}
+                      onClick={() => setActiveTool(activeTool === "pen" ? "none" : "pen")}
+                    >
+                      ✏️ Pen
+                    </button>
+                    <button
+                      className={`${styles.penToolBtn} ${laserEnabled ? styles.penToolBtnActive : ""}`}
+                      onClick={() => setActiveTool(activeTool === "laser" ? "none" : "laser")}
+                    >
+                      🔴 Laser
+                    </button>
+                    <button
+                      className={styles.penToolBtn}
+                      onClick={clearAllDrawings}
+                      disabled={drawings.length === 0}
+                    >
+                      🗑️ Clear
+                    </button>
+                  </div>
+                </div>
+              )}
+              </>
             )}
           </div>
         </div>
@@ -1017,10 +1176,18 @@ export default function UnifiedRoom() {
 
             <button
               className={`btn ${drawingEnabled ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => setDrawingEnabled(!drawingEnabled)}
+              onClick={() => setActiveTool(activeTool === "pen" ? "none" : "pen")}
               title="Toggle drawing mode"
             >
               {drawingEnabled ? "✏️ Drawing" : "✏️ Pen"}
+            </button>
+
+            <button
+              className={`btn ${laserEnabled ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setActiveTool(activeTool === "laser" ? "none" : "laser")}
+              title="Toggle laser pointer"
+            >
+              🔴 Laser
             </button>
 
             <button
@@ -1039,11 +1206,9 @@ export default function UnifiedRoom() {
               {isPointerVisible ? "👁️ Pointer On" : "👁️ Pointer Off"}
             </button>
 
-            {drawings.length > 0 && (
-              <button className="btn btn-ghost" onClick={clearAllDrawings}>
-                🗑️ Clear
-              </button>
-            )}
+            <button className="btn btn-ghost" onClick={clearAllDrawings} disabled={drawings.length === 0}>
+              🗑️ Clear
+            </button>
 
             <button className="btn btn-ghost" onClick={toggleFullscreen}>
               {isFullscreen ? "⛶ Exit" : "⛶ Fullscreen"}
