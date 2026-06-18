@@ -1120,28 +1120,25 @@ export default function UnifiedRoom() {
 
               {myMode === "presenting" && (
                 <div className={styles.floatingToolbarZoneRight}>
-                  <div className={styles.floatingToolbar}>
+                  <div className={styles.penToolbar}>
                     <button
-                      className={`${styles.toolbarBtn} ${drawingEnabled ? styles.toolbarBtnActive : ""}`}
+                      className={`${styles.penToolBtn} ${drawingEnabled ? styles.penToolBtnActive : ""}`}
                       onClick={() => setActiveTool(activeTool === "pen" ? "none" : "pen")}
-                      title="Pen"
                     >
-                      ✏️
+                      ✏️ Pen
                     </button>
                     <button
-                      className={`${styles.toolbarBtn} ${laserEnabled ? styles.toolbarBtnActive : ""}`}
+                      className={`${styles.penToolBtn} ${laserEnabled ? styles.penToolBtnActive : ""}`}
                       onClick={() => setActiveTool(activeTool === "laser" ? "none" : "laser")}
-                      title="Laser pointer"
                     >
-                      🔴
+                      🔴 Laser
                     </button>
                     <button
-                      className={styles.toolbarBtn}
+                      className={styles.penToolBtn}
                       onClick={clearAllDrawings}
-                      title="Clear drawings"
                       disabled={drawings.length === 0}
                     >
-                      🗑️
+                      🗑️ Clear
                     </button>
                   </div>
                 </div>
