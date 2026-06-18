@@ -48,7 +48,7 @@ export async function createRoom(roomId: string, slides: Buffer[]): Promise<Room
   slides.forEach((slide, index) => {
     pipeline.setex(
       `room:${roomId}:slide:${index}`,
-      3600 * 4, // 4 hour TTL
+      3600 * 24, // 24 hour TTL
       slide
     );
   });
@@ -63,7 +63,7 @@ export async function createRoom(roomId: string, slides: Buffer[]): Promise<Room
   
   pipeline.setex(
     `room:${roomId}:meta`,
-    3600 * 4, // 4 hour TTL
+    3600 * 24, // 24 hour TTL
     JSON.stringify(metadata)
   );
   
@@ -118,7 +118,7 @@ export async function updateCurrentSlide(roomId: string, slideIndex: number): Pr
   if (metaJson) {
     const meta = JSON.parse(metaJson);
     meta.currentSlide = slideIndex;
-    await redis.setex(`room:${roomId}:meta`, 3600 * 4, JSON.stringify(meta));
+    await redis.setex(`room:${roomId}:meta`, 3600 * 24, JSON.stringify(meta));
   }
 }
 

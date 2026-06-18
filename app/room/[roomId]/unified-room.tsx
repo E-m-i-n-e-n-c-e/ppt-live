@@ -124,23 +124,7 @@ export default function UnifiedRoom() {
 
     socket.on("room-state", (data: RoomState) => {
       setState(data);
-
-      const slideParam = searchParams.get("slide");
-      let initialTarget = data.currentSlide;
-
-      if (slideParam !== null && slideParam !== "") {
-        let requested = parseInt(slideParam, 10) - 1;
-        if (isNaN(requested)) requested = 0;
-        if (requested < 0) requested = 0;
-        if (requested >= data.totalSlides) requested = data.totalSlides - 1;
-        initialTarget = requested;
-
-        if (myMode === "presenting" && initialTarget !== data.currentSlide) {
-          socket.emit("slide-change", { roomId, slideIndex: initialTarget });
-        }
-      }
-
-      setCurrentSlide(initialTarget);
+      setCurrentSlide(data.currentSlide);
     });
 
     socket.on("participant-joined", ({ participant }: { participant: Participant }) => {
@@ -274,9 +258,8 @@ export default function UnifiedRoom() {
     const url = new URL(window.location.href);
     url.searchParams.set("mode", myMode);
     url.searchParams.set("name", appliedName);
-    url.searchParams.set("slide", (currentSlide + 1).toString());
     window.history.replaceState(null, "", url.toString());
-  }, [myMode, appliedName, currentSlide, state]);
+  }, [myMode, appliedName, state]);
 
   // ── Keyboard navigation ──────────────────────────────────────────────────────
   useEffect(() => {
