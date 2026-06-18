@@ -50,6 +50,7 @@ export default function UnifiedRoom() {
 
   const [state, setState] = useState<RoomState | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [slideDirection, setSlideDirection] = useState<"next" | "prev">("next");
   const [myMode, setMyMode] = useState<"presenting" | "viewing">(initialMode);
   const [copied, setCopied] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -130,7 +131,11 @@ export default function UnifiedRoom() {
 
     socket.on("room-state", (data: RoomState) => {
       setState(data);
-      setCurrentSlide(data.currentSlide);
+      setCurrentSlide((prev) => {
+        if (data.currentSlide > prev) setSlideDirection("next");
+        else if (data.currentSlide < prev) setSlideDirection("prev");
+        return data.currentSlide;
+      });
     });
 
     socket.on("participant-joined", ({ participant }: { participant: Participant }) => {
@@ -163,7 +168,11 @@ export default function UnifiedRoom() {
     });
 
     socket.on("slide-update", ({ slideIndex }: { slideIndex: number }) => {
-      setCurrentSlide(slideIndex);
+      setCurrentSlide((prev) => {
+        if (slideIndex > prev) setSlideDirection("next");
+        else if (slideIndex < prev) setSlideDirection("prev");
+        return slideIndex;
+      });
     });
 
     socket.on("cursor-update", ({ participantId, name, x, y }: CursorPosition) => {
@@ -262,7 +271,7 @@ export default function UnifiedRoom() {
   useEffect(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("mode", myMode);
-    
+
     // Immediately remove tempName so it doesn't stay in the URL
     if (url.searchParams.has("tempName")) {
       url.searchParams.delete("tempName");
@@ -360,6 +369,7 @@ export default function UnifiedRoom() {
       if (!state || myMode !== "presenting") return;
       const clamped = Math.max(0, Math.min(idx, state.totalSlides - 1));
       if (clamped === currentSlide) return;
+      setSlideDirection(clamped > currentSlide ? "next" : "prev");
       setCurrentSlide(clamped);
       getSocket().emit("slide-change", { roomId, slideIndex: clamped });
     },
@@ -828,12 +838,25 @@ export default function UnifiedRoom() {
               height: stageDimensions.height ? `${stageDimensions.height}px` : "100%",
             }}
           >
-            <img
-              key={slideUrl}
-              src={slideUrl}
-              alt={`Slide ${currentSlide + 1}`}
-              className={styles.slideImg}
-            />
+            {slideUrls.map((url, i) => (
+              <img
+                key={url}
+                src={url}
+                alt={`Slide ${i + 1}`}
+                className={`${styles.slideImg} ${i === currentSlide
+                  ? slideDirection === "next"
+                    ? styles.slideNext
+                    : styles.slidePrev
+                  : ""
+                  }`}
+                style={{
+                  display: i === currentSlide ? "block" : "none",
+                  position: "absolute",
+                  top: 0,
+                  left: 0
+                }}
+              />
+            ))}
 
             {/* Drawing Canvas */}
             <canvas

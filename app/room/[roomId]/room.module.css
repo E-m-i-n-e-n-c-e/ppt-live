@@ -269,8 +269,39 @@
   height: 100%;
   object-fit: contain;
   display: block;
-  animation: fadeUp 0.2s ease;
 }
+
+.slideNext {
+  animation: slideNextAnim 1s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* .slidePrev {
+  animation: slidePrevAnim 1s cubic-bezier(0.16, 1, 0.3, 1);
+} */
+
+@keyframes slideNextAnim {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* @keyframes slidePrevAnim {
+  from {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+} */
 
 /* Controls */
 .controls {
