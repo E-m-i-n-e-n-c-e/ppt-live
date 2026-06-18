@@ -131,7 +131,7 @@ export default function UnifiedRoom() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<"info" | "slides">("info");
-  const [controlsVisible, setControlsVisible] = useState(true);
+  const [cursorVisible, setCursorVisible] = useState(true);
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isOptionsOpenRef = useRef(false);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -348,29 +348,31 @@ export default function UnifiedRoom() {
     isOptionsOpenRef.current = isOptionsOpen;
   }, [isOptionsOpen]);
 
-  // Keynote-style idle auto-hide for fullscreen controls + cursor
+  // Keynote-style idle auto-hide for cursor
   useEffect(() => {
     if (!isFullscreen) {
-      setControlsVisible(true);
+      setCursorVisible(true);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       return;
     }
 
-    const REVEAL_ZONE = 160; // px from bottom edge
-    const resetTimer = (e?: MouseEvent) => {
-      const nearConsole = !e || e.clientY >= window.innerHeight - REVEAL_ZONE;
-      if (!nearConsole) return;
-      setControlsVisible(true);
+    setCursorVisible(true);
+
+    const handleMouseMove = () => {
+      setCursorVisible(true);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       if (!isOptionsOpenRef.current) {
-        idleTimerRef.current = setTimeout(() => setControlsVisible(false), 2500);
+        idleTimerRef.current = setTimeout(() => setCursorVisible(false), 2500);
       }
     };
 
-    resetTimer(); // show immediately on fullscreen entry
-    window.addEventListener("mousemove", resetTimer);
+    // Initialize cursor timer
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = setTimeout(() => setCursorVisible(false), 2500);
+
+    window.addEventListener("mousemove", handleMouseMove);
     return () => {
-      window.removeEventListener("mousemove", resetTimer);
+      window.removeEventListener("mousemove", handleMouseMove);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
   }, [isFullscreen]);
@@ -379,7 +381,7 @@ export default function UnifiedRoom() {
   useEffect(() => {
     if (isOptionsOpen && isFullscreen) {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-      setControlsVisible(true);
+      setCursorVisible(true);
     }
   }, [isOptionsOpen, isFullscreen]);
 
@@ -412,6 +414,9 @@ export default function UnifiedRoom() {
       }
 
       if (e.key === "Escape") {
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(err => console.error(err));
+        }
         setIsFullscreen(false);
         return;
       }
@@ -486,7 +491,7 @@ export default function UnifiedRoom() {
             const age = now - entry.lastActivity;
             const alpha = age < HOLD_MS ? 1
               : age < HOLD_MS + FADE_MS ? 1 - (age - HOLD_MS) / FADE_MS
-              : 0;
+                : 0;
             if (alpha <= 0) { laserStrokesRef.current.delete(participantId); return; }
             ctx.save();
             ctx.globalAlpha = alpha;
@@ -538,6 +543,9 @@ export default function UnifiedRoom() {
   };
 
   const toggleFullscreen = () => {
+    if (isFullscreen && document.fullscreenElement) {
+      document.exitFullscreen().catch(err => console.error(err));
+    }
     setIsFullscreen((prev) => !prev);
     setIsOptionsOpen(false); // Close menu when exiting fullscreen
   };
@@ -824,181 +832,181 @@ export default function UnifiedRoom() {
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
       <aside className={`${styles.sidebar} ${sidebarHidden ? styles.sidebarCollapsed : ""}`}>
         <div className={styles.sidebarInner}>
-        <div className={styles.sideTop}>
-          <a href="/" className={styles.logo}>
-            ppt-live
-          </a>
-          <button
-            className={styles.sidebarToggle}
-            onClick={() => setSidebarHidden(true)}
-            title="Hide sidebar"
-          >
-            <PanelLeftClose size={15} />
-          </button>
-          <div className={styles.tabs}>
+          <div className={styles.sideTop}>
+            <a href="/" className={styles.logo}>
+              ppt-live
+            </a>
             <button
-              className={`${styles.tabBtn} ${sidebarTab === "info" ? styles.tabActive : ""}`}
-              onClick={() => setSidebarTab("info")}
+              className={styles.sidebarToggle}
+              onClick={() => setSidebarHidden(true)}
+              title="Hide sidebar"
             >
-              <Info size={13} />
-              Info
+              <PanelLeftClose size={15} />
             </button>
-            <button
-              className={`${styles.tabBtn} ${sidebarTab === "slides" ? styles.tabActive : ""}`}
-              onClick={() => setSidebarTab("slides")}
-            >
-              <LayoutGrid size={13} />
-              Slides
-            </button>
+            <div className={styles.tabs}>
+              <button
+                className={`${styles.tabBtn} ${sidebarTab === "info" ? styles.tabActive : ""}`}
+                onClick={() => setSidebarTab("info")}
+              >
+                <Info size={13} />
+                Info
+              </button>
+              <button
+                className={`${styles.tabBtn} ${sidebarTab === "slides" ? styles.tabActive : ""}`}
+                onClick={() => setSidebarTab("slides")}
+              >
+                <LayoutGrid size={13} />
+                Slides
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div className={styles.sideContent}>
-          {sidebarTab === "info" ? (
-            <>
-              {/* Mode Toggle */}
-              <div className={styles.modeToggle}>
-                <button
-                  className={`btn ${myMode === "presenting" ? "btn-primary" : "btn-ghost"}`}
-                  onClick={toggleMode}
-                  style={{ width: "100%", marginBottom: 8 }}
-                >
-                  {myMode === "presenting" ? <><Mic size={14} /> Presenting</> : <><Eye size={14} /> Viewing</>}
-                </button>
-                <p style={{ fontSize: 11, color: "var(--text-2)", textAlign: "center" }}>
-                  {myMode === "presenting"
-                    ? "You can present & control slides"
-                    : "Click to switch to presenting mode"}
-                </p>
-              </div>
+          <div className={styles.sideContent}>
+            {sidebarTab === "info" ? (
+              <>
+                {/* Mode Toggle */}
+                <div className={styles.modeToggle}>
+                  <button
+                    className={`btn ${myMode === "presenting" ? "btn-primary" : "btn-ghost"}`}
+                    onClick={toggleMode}
+                    style={{ width: "100%", marginBottom: 8 }}
+                  >
+                    {myMode === "presenting" ? <><Mic size={14} /> Presenting</> : <><Eye size={14} /> Viewing</>}
+                  </button>
+                  <p style={{ fontSize: 11, color: "var(--text-2)", textAlign: "center" }}>
+                    {myMode === "presenting"
+                      ? "You can present & control slides"
+                      : "Click to switch to presenting mode"}
+                  </p>
+                </div>
 
-              {/* User Name */}
-              <div className={styles.nameCard}>
-                {isEditingName ? (
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <input
-                      type="text"
-                      className="input"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleNameChange()}
-                      onBlur={handleNameChange}
-                      autoFocus
-                      style={{ flex: 1, fontSize: 13 }}
-                    />
+                {/* User Name */}
+                <div className={styles.nameCard}>
+                  {isEditingName ? (
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <input
+                        type="text"
+                        className="input"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleNameChange()}
+                        onBlur={handleNameChange}
+                        autoFocus
+                        style={{ flex: 1, fontSize: 13 }}
+                      />
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                        <User size={13} style={{ opacity: 0.6 }} /> {newName}
+                      </span>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => setIsEditingName(true)}
+                        style={{ fontSize: 11, padding: "4px 8px" }}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Room code */}
+                <div className={styles.codeCard}>
+                  <div className={styles.codeLabel}>
+                    <span className="live-dot" />
+                    Room Code
                   </div>
-                ) : (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                      <User size={13} style={{ opacity: 0.6 }} /> {newName}
-                    </span>
+                  <div className={styles.code}>{roomId}</div>
+                  <div className={styles.codeActions}>
                     <button
                       className="btn btn-ghost"
-                      onClick={() => setIsEditingName(true)}
-                      style={{ fontSize: 11, padding: "4px 8px" }}
+                      onClick={copyRoomCode}
+                      style={{ flex: 1, fontSize: 12, padding: "8px 10px", minWidth: 0 }}
                     >
-                      Edit
+                      {copiedType === "code" ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy Code</>}
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={copyJoinLink}
+                      style={{ flex: 1, fontSize: 12, padding: "8px 10px", minWidth: 0 }}
+                    >
+                      {copiedType === "link" ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy Link</>}
                     </button>
                   </div>
-                )}
-              </div>
+                </div>
 
-              {/* Room code */}
-              <div className={styles.codeCard}>
-                <div className={styles.codeLabel}>
-                  <span className="live-dot" />
-                  Room Code
-                </div>
-                <div className={styles.code}>{roomId}</div>
-                <div className={styles.codeActions}>
-                  <button
-                    className="btn btn-ghost"
-                    onClick={copyRoomCode}
-                    style={{ flex: 1, fontSize: 12, padding: "8px 10px", minWidth: 0 }}
-                  >
-                    {copiedType === "code" ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy Code</>}
-                  </button>
-                  <button
-                    className="btn btn-ghost"
-                    onClick={copyJoinLink}
-                    style={{ flex: 1, fontSize: 12, padding: "8px 10px", minWidth: 0 }}
-                  >
-                    {copiedType === "link" ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy Link</>}
-                  </button>
-                </div>
-              </div>
-
-              {/* Participants */}
-              <div className={styles.viewersSection}>
-                <div className={styles.viewersHeader}>
-                  <span>Participants</span>
-                  <span className="badge badge-accent">{state.participants.length}</span>
-                </div>
-                <div className={styles.viewersList}>
-                  {presenters.length > 0 && (
-                    <>
-                      <p style={{ fontSize: 10, color: "var(--text-2)", margin: "8px 0 4px" }}>
-                        PRESENTING
-                      </p>
-                      {presenters.map((p) => (
-                        <div key={p.id} className={styles.viewer}>
-                          <div className={styles.avatar} style={{ background: "var(--accent)" }}>
-                            {p.name[0].toUpperCase()}
+                {/* Participants */}
+                <div className={styles.viewersSection}>
+                  <div className={styles.viewersHeader}>
+                    <span>Participants</span>
+                    <span className="badge badge-accent">{state.participants.length}</span>
+                  </div>
+                  <div className={styles.viewersList}>
+                    {presenters.length > 0 && (
+                      <>
+                        <p style={{ fontSize: 10, color: "var(--text-2)", margin: "8px 0 4px" }}>
+                          PRESENTING
+                        </p>
+                        {presenters.map((p) => (
+                          <div key={p.id} className={styles.viewer}>
+                            <div className={styles.avatar} style={{ background: "var(--accent)" }}>
+                              {p.name[0].toUpperCase()}
+                            </div>
+                            <span>{p.name}</span>
                           </div>
-                          <span>{p.name}</span>
-                        </div>
-                      ))}
-                    </>
-                  )}
-                  {viewers.length > 0 && (
-                    <>
-                      <p style={{ fontSize: 10, color: "var(--text-2)", margin: "8px 0 4px" }}>
-                        VIEWING
-                      </p>
-                      {viewers.map((p) => (
-                        <div key={p.id} className={styles.viewer}>
-                          <div className={styles.avatar}>{p.name[0].toUpperCase()}</div>
-                          <span>{p.name}</span>
-                        </div>
-                      ))}
-                    </>
-                  )}
+                        ))}
+                      </>
+                    )}
+                    {viewers.length > 0 && (
+                      <>
+                        <p style={{ fontSize: 10, color: "var(--text-2)", margin: "8px 0 4px" }}>
+                          VIEWING
+                        </p>
+                        {viewers.map((p) => (
+                          <div key={p.id} className={styles.viewer}>
+                            <div className={styles.avatar}>{p.name[0].toUpperCase()}</div>
+                            <span>{p.name}</span>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              <div style={{ marginTop: "auto", paddingTop: 16 }}>
-                <button className="btn btn-danger" onClick={leaveSession} style={{ width: "100%" }}>
-                  <LogOut size={14} /> Leave Session
-                </button>
+                <div style={{ marginTop: "auto", paddingTop: 16 }}>
+                  <button className="btn btn-danger" onClick={leaveSession} style={{ width: "100%" }}>
+                    <LogOut size={14} /> Leave Session
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className={styles.slideStrip}>
+                {slideUrls.map((src, i) => (
+                  <button
+                    key={i}
+                    ref={(el) => {
+                      thumbRefs.current[i] = el;
+                    }}
+                    className={`${styles.stripThumb} ${i === currentSlide ? styles.stripActive : ""}`}
+                    onClick={() => myMode === "presenting" && goTo(i)}
+                    disabled={myMode !== "presenting"}
+                    title={`Slide ${i + 1}`}
+                  >
+                    <img src={src} alt={`Slide ${i + 1}`} />
+                    <span className={styles.thumbNum}>{i + 1}</span>
+                  </button>
+                ))}
               </div>
-            </>
-          ) : (
-            <div className={styles.slideStrip}>
-              {slideUrls.map((src, i) => (
-                <button
-                  key={i}
-                  ref={(el) => {
-                    thumbRefs.current[i] = el;
-                  }}
-                  className={`${styles.stripThumb} ${i === currentSlide ? styles.stripActive : ""}`}
-                  onClick={() => myMode === "presenting" && goTo(i)}
-                  disabled={myMode !== "presenting"}
-                  title={`Slide ${i + 1}`}
-                >
-                  <img src={src} alt={`Slide ${i + 1}`} />
-                  <span className={styles.thumbNum}>{i + 1}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className={styles.sideBottom}>
-          <div className={styles.connectionStatus}>
-            <span className={connected ? "live-dot" : ""} />
-            {connected ? "Connected" : "Reconnecting…"}
+            )}
           </div>
-        </div>
+
+          <div className={styles.sideBottom}>
+            <div className={styles.connectionStatus}>
+              <span className={connected ? "live-dot" : ""} />
+              {connected ? "Connected" : "Reconnecting…"}
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -1023,7 +1031,7 @@ export default function UnifiedRoom() {
         <div
           ref={slideContainerRef}
           className={`${styles.slideWrap} ${isFullscreen ? styles.theaterMode : ""} ${sidebarHidden && !isFullscreen ? styles.slideWrapWide : ""}`}
-          style={{ cursor: (myMode === "presenting" && showCustomCursor) || (isFullscreen && !controlsVisible) ? "none" : "default" }}
+          style={{ cursor: (myMode === "presenting" && showCustomCursor) || (isFullscreen && !cursorVisible) ? "none" : "default" }}
         >
           <div
             className={styles.stageContent}
@@ -1055,9 +1063,8 @@ export default function UnifiedRoom() {
 
             {/* Drawing Canvas */}
             <canvas
-              key={currentSlide}
               ref={canvasRef}
-              className={`${styles.drawingCanvas} ${slideDirection === "next" ? styles.slideNext : styles.slidePrev}`}
+              className={styles.drawingCanvas}
               width={1920}
               height={1080}
               onMouseDown={handleDrawStart}
@@ -1136,7 +1143,7 @@ export default function UnifiedRoom() {
 
             {/* Fullscreen console — Keynote-style idle auto-hide */}
             {isFullscreen && (
-              <div className={`${styles.consoleZone} ${controlsVisible ? "" : styles.consoleZoneHidden}`}>
+              <div className={styles.consoleZone} onMouseLeave={() => setIsOptionsOpen(false)}>
                 <div className={styles.console}>
                   {/* Slide nav */}
                   <button
@@ -1193,33 +1200,27 @@ export default function UnifiedRoom() {
                   <div className={styles.consoleDivider} />
 
                   {/* Options menu */}
-                  <div style={{ position: "relative" }}>
-                    <button
-                      className={styles.consoleBtn}
-                      onClick={(e) => { e.stopPropagation(); setIsOptionsOpen(!isOptionsOpen); }}
-                      title="Options"
-                    >
-                      <MoreVertical size={16} />
-                    </button>
-                    {isOptionsOpen && (
-                      <div className={styles.optionsMenu}>
-                        {myMode === "presenting" && (
-                          <>
-                            <button onClick={(e) => { e.stopPropagation(); togglePointerVisibility(); setIsOptionsOpen(false); }}>
-                              {isPointerVisible ? <><EyeOff size={13} /> Hide pointer</> : <><Eye size={13} /> Show pointer</>}
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); setShowCustomCursor(!showCustomCursor); setIsOptionsOpen(false); }}>
-                              <MousePointer2 size={13} /> {showCustomCursor ? "Default cursor" : "Custom cursor"}
-                            </button>
-                            <div className={styles.menuDivider} />
-                          </>
-                        )}
-                        <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); setIsOptionsOpen(false); }}>
-                          <Minimize2 size={13} /> Exit fullscreen
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  {myMode === "presenting" && (
+                    <div style={{ position: "relative" }}>
+                      <button
+                        className={styles.consoleBtn}
+                        onClick={(e) => { e.stopPropagation(); setIsOptionsOpen(!isOptionsOpen); }}
+                        title="Options"
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+                      {isOptionsOpen && (
+                        <div className={styles.optionsMenu}>
+                          <button onClick={(e) => { e.stopPropagation(); togglePointerVisibility(); setIsOptionsOpen(false); }}>
+                            {isPointerVisible ? <><EyeOff size={13} /> Hide pointer</> : <><Eye size={13} /> Show pointer</>}
+                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); setShowCustomCursor(!showCustomCursor); setIsOptionsOpen(false); }}>
+                            <MousePointer2 size={13} /> {showCustomCursor ? "Default cursor" : "Custom cursor"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Exit fullscreen */}
                   <button
@@ -1238,7 +1239,7 @@ export default function UnifiedRoom() {
         {/* Controls */}
         {myMode === "presenting" && (
           <div className={styles.controls}>
-            <div className={styles.console}>
+            <div className={styles.console} style={{ position: "relative" }}>
               <button
                 className={styles.consoleBtn}
                 onClick={() => goTo(currentSlide - 1)}
@@ -1311,6 +1312,13 @@ export default function UnifiedRoom() {
               >
                 <Maximize2 size={16} />
               </button>
+
+              {/* Toast Notification (Normal mode) */}
+              {toastMessage && !isFullscreen && (
+                <div className={`${styles.toastBase} ${styles.toastLocal}`}>
+                  {toastMessage}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1321,7 +1329,7 @@ export default function UnifiedRoom() {
               <span className="live-dot" style={{ width: 5, height: 5 }} />
               Watching {presenters.length > 0 ? presenters[0].name : "presentation"}
             </div>
-            <div className={styles.console}>
+            <div className={styles.console} style={{ position: "relative" }}>
               <button
                 className={styles.consoleBtn}
                 onClick={toggleFullscreen}
@@ -1338,13 +1346,20 @@ export default function UnifiedRoom() {
                 <Monitor size={14} />
                 Takeover
               </button>
+
+              {/* Toast Notification (Normal mode) */}
+              {toastMessage && !isFullscreen && (
+                <div className={`${styles.toastBase} ${styles.toastLocal}`}>
+                  {toastMessage}
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Toast Notification */}
-        {toastMessage && (
-          <div className={styles.toast}>
+        {/* Toast Notification (Fullscreen mode) */}
+        {toastMessage && isFullscreen && (
+          <div className={`${styles.toastBase} ${styles.toastFullscreen}`}>
             {toastMessage}
           </div>
         )}

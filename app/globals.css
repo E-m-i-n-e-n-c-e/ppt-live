@@ -216,11 +216,3 @@ input, textarea { font-family: inherit; }
   z-index: 1;
   min-height: 100dvh;
 }
-
-/* ─── Reduced motion ──────────────────────────────────────────────────────── */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
-}

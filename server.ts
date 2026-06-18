@@ -13,6 +13,8 @@ import {
   upsertDrawing,
   clearSlideDrawings,
   getAllDrawings,
+  deleteRoom,
+  sweepInactiveRooms,
   type Participant
 } from "./lib/room-store";
 
@@ -29,6 +31,12 @@ nextApp.prepare().then(() => {
   const io = new Server(httpServer, {
     cors: { origin: "*", methods: ["GET", "POST"] },
   });
+
+  // Run cleanup sweep every day
+  setInterval(() => {
+    sweepInactiveRooms();
+    console.log("[sweep] Swept inactive rooms");
+  }, 24 * 60 * 60 * 1000);
 
   // ─── Socket Events ───────────────────────────────────────────────────────────
 
@@ -219,6 +227,7 @@ nextApp.prepare().then(() => {
       if (!participant) return;
 
       io.to(roomId).emit("session-ended", {});
+      deleteRoom(roomId).catch(err => console.error(`[WS] error deleting room ${roomId}`, err));
       console.log(`[WS] Room ${roomId} ended by ${participant.name}`);
     });
 

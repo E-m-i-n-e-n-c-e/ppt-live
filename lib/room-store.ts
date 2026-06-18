@@ -112,6 +112,7 @@ export async function roomExists(roomId: string): Promise<boolean> {
 
 // Helper to update current slide
 export async function updateCurrentSlide(roomId: string, slideIndex: number): Promise<void> {
+  markRoomActive(roomId);
   const redis = getRedis();
   const metaJson = await redis.get(`room:${roomId}:meta`);
   
@@ -125,6 +126,11 @@ export async function updateCurrentSlide(roomId: string, slideIndex: number): Pr
 // Helper to delete a room
 export async function deleteRoom(roomId: string): Promise<void> {
   const redis = getRedis();
+  
+  // Clear in-memory state unconditionally
+  participantsByRoom.delete(roomId);
+  drawingsByRoom.delete(roomId);
+  roomLastActive.delete(roomId);
   
   // Get total slides to know how many keys to delete
   const metaJson = await redis.get(`room:${roomId}:meta`);
@@ -150,37 +156,62 @@ export interface StoredDrawPath {
   drawingId?: string;
 }
 
+// In-memory drawing storage: Map<roomId, Record<slideIndex, StoredDrawPath[]>>
+const drawingsByRoom = new Map<string, Record<number, StoredDrawPath[]>>();
+
+// In-memory activity tracking to clean up abandoned rooms
+const roomLastActive = new Map<string, number>();
+
+export function markRoomActive(roomId: string): void {
+  roomLastActive.set(roomId, Date.now());
+}
+
+export function sweepInactiveRooms(maxIdleMs: number = 3600 * 1000 * 24): void {
+  const now = Date.now();
+  for (const [roomId, lastActive] of roomLastActive.entries()) {
+    if (now - lastActive > maxIdleMs) {
+      deleteRoom(roomId).catch(err => console.error(`[sweep] Failed to delete room ${roomId}`, err));
+    }
+  }
+}
+
 export async function upsertDrawing(roomId: string, slideIndex: number, drawing: StoredDrawPath): Promise<void> {
-  const redis = getRedis();
-  const key = `room:${roomId}:drawings`;
-  const field = String(slideIndex);
-  const existing = await redis.hget(key, field);
-  const drawings: StoredDrawPath[] = existing ? JSON.parse(existing) : [];
-  const idx = drawings.findIndex(d => d.drawingId && d.drawingId === drawing.drawingId);
-  if (idx >= 0) drawings[idx] = drawing;
-  else drawings.push(drawing);
-  await redis.hset(key, field, JSON.stringify(drawings));
-  await redis.expire(key, 3600 * 24);
+  markRoomActive(roomId);
+  if (!drawingsByRoom.has(roomId)) {
+    drawingsByRoom.set(roomId, {});
+  }
+  const roomDrawings = drawingsByRoom.get(roomId)!;
+  if (!roomDrawings[slideIndex]) {
+    roomDrawings[slideIndex] = [];
+  }
+  
+  const slideDrawings = roomDrawings[slideIndex];
+  const idx = slideDrawings.findIndex(d => d.drawingId && d.drawingId === drawing.drawingId);
+  
+  if (idx >= 0) {
+    slideDrawings[idx] = drawing;
+  } else {
+    slideDrawings.push(drawing);
+  }
 }
 
 export async function clearSlideDrawings(roomId: string, slideIndex: number): Promise<void> {
-  const redis = getRedis();
-  await redis.hdel(`room:${roomId}:drawings`, String(slideIndex));
+  markRoomActive(roomId);
+  const roomDrawings = drawingsByRoom.get(roomId);
+  if (roomDrawings) {
+    roomDrawings[slideIndex] = [];
+  }
 }
 
 export async function getAllDrawings(roomId: string): Promise<Record<number, StoredDrawPath[]>> {
-  const redis = getRedis();
-  const raw = await redis.hgetall(`room:${roomId}:drawings`);
-  if (!raw) return {};
-  return Object.fromEntries(
-    Object.entries(raw).map(([slide, json]) => [Number(slide), JSON.parse(json)])
-  );
+  return drawingsByRoom.get(roomId) || {};
 }
 
 // In-memory participant tracking (WebSocket connections are process-local)
 const participantsByRoom = new Map<string, Map<string, Participant>>();
 
 export function addParticipant(roomId: string, participant: Participant): void {
+  markRoomActive(roomId);
   if (!participantsByRoom.has(roomId)) {
     participantsByRoom.set(roomId, new Map());
   }
@@ -203,6 +234,7 @@ export function getParticipants(roomId: string): Participant[] {
 }
 
 export function updateParticipant(roomId: string, participant: Participant): void {
+  markRoomActive(roomId);
   const participants = participantsByRoom.get(roomId);
   if (participants) {
     participants.set(participant.id, participant);

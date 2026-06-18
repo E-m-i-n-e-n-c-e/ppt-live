@@ -346,26 +346,10 @@
   animation: slideNextAnim 1s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.slidePrev {
-  animation: slidePrevAnim 1s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
 @keyframes slideNextAnim {
   from {
     opacity: 0;
     transform: translateX(40px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes slidePrevAnim {
-  from {
-    opacity: 0;
-    transform: translateX(-40px);
   }
 
   to {
@@ -478,29 +462,54 @@
 
 /* ── Toast Notification ─────────────────────────────────────────────────────── */
 
-.toast {
-  position: fixed;
-  bottom: 32px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text);
+.toastBase {
+  background: var(--overlay);
+  backdrop-filter: var(--overlay-blur);
+  -webkit-backdrop-filter: var(--overlay-blur);
+  border: 1px solid var(--overlay-border);
+  color: var(--text-2);
   padding: 10px 20px;
-  border-radius: 99px;
+  border-radius: var(--radius);
   font-size: 13px;
   font-weight: 500;
   box-shadow: var(--shadow-lg);
   z-index: 10000;
-  animation: toastFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
-@keyframes toastFadeIn {
+.toastLocal {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  animation: toastFadeInTop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toastFullscreen {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: toastFadeInBottom 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes toastFadeInTop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes toastFadeInBottom {
   from {
     opacity: 0;
     transform: translate(-50%, 10px);
   }
-
   to {
     opacity: 1;
     transform: translate(-50%, 0);
@@ -509,20 +518,16 @@
 
 /* ── Fullscreen / Windowed Console ──────────────────────────────────────── */
 
-/* Fullscreen: centered bottom zone with idle-hide */
+/* Fullscreen: bottom left zone with hover-hide */
 .consoleZone {
   position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 0;
+  left: 0;
+  padding: 40px;
+  padding-bottom: 24px;
+  padding-left: 24px;
   z-index: 10000;
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
-
-.consoleZoneHidden {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
-  pointer-events: none;
+  cursor: default;
 }
 
 /* Shared console bar */
@@ -539,6 +544,19 @@
   box-shadow: var(--shadow-lg);
 }
 
+.consoleZone .console {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.consoleZone:hover .console {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+
+
 /* Icon-only button */
 .consoleBtn {
   display: flex;
@@ -553,6 +571,7 @@
   transition: background var(--transition), color var(--transition);
   flex-shrink: 0;
   cursor: pointer;
+  outline: none;
 }
 
 .consoleBtn:hover:not(:disabled) {
@@ -581,6 +600,7 @@
   white-space: nowrap;
   transition: background var(--transition), color var(--transition);
   cursor: pointer;
+  outline: none;
 }
 
 .consoleBtnLabeled:hover:not(:disabled) {
