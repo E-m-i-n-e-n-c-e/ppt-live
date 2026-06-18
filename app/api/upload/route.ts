@@ -18,7 +18,7 @@ async function convertPdf(pdfPath: string, outDir: string): Promise<void> {
   try {
     // pdftoppm outputs files as prefix-pagenum.png (e.g., page-1.png, page-2.png)
     await execAsync(
-      `pdftoppm -png -scale-to 2560 -aa yes -aaVector yes "${pdfPath}" "${path.join(outDir, "page")}"`
+      `pdftoppm -png -scale-to 3840 -aa yes -aaVector yes "${pdfPath}" "${path.join(outDir, "page")}"`
     );
   } catch (error: any) {
     console.error("[convertPdf] Error:", error.message);
