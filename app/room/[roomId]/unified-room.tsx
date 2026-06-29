@@ -1113,6 +1113,7 @@ export default function UnifiedRoom() {
                 key={url}
                 src={url}
                 alt={`Slide ${i + 1}`}
+                draggable={false}
                 className={`${styles.slideImg} ${i === currentSlide
                   ? slideDirection === "next"
                     ? styles.slideNext
